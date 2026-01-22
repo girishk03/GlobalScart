@@ -1,25 +1,60 @@
-# GlobalCart 360: E-Commerce Analytics Platform (with Demo Storefront + Admin)
+# GlobalCart 360: E-Commerce Analytics Platform + Transactional Store (Demo)
 
-GlobalCart 360 is an end-to-end analytics platform for a global e-commerce business. It delivers a **single source of truth** (PostgreSQL star schema), **near real-time KPIs**, **customer retention analytics** (RFM + churn + cohorts), **profit leakage analysis**, **revenue/demand forecasting**, a **demo customer storefront** (for funnel tracking and UX walkthrough), and an **admin dashboard**.
+GlobalCart 360 is a **dual-purpose system**:
+- **Analytics platform** for a global e-commerce business (single source of truth, near real-time KPIs, RFM/churn/cohorts, profit leakage, forecasting, BI marts)
+- **Transactional demo storefront** with a **real order + payment lifecycle** (cart, checkout, atomic order creation, payment simulation, state transitions with rollback)
 
-Note: this repository is primarily focused on analytics, KPI consistency, and data/BI workflows. The storefront/admin routes are intended for demonstration and are not positioned as a full production e-commerce system (payments, full checkout, etc.).
+> This repo demonstrates both analytical and transactional patterns. The storefront is a demo, but the order/payment flow is implemented with real database transactions and explicit state machines.
 
 ## Tech Stack
 - SQL: PostgreSQL
 - Python: FastAPI, pandas, numpy, seaborn/matplotlib, scikit-learn, statsmodels
 - Frontend: HTML/CSS/JavaScript with Bootstrap, voice search
+- Auth: OTP + JWT + role-based access
 - Excel: KPI + pivot-based management report (generated/extracted from the same KPI definitions)
 - Power BI / Tableau: dashboard specs + DAX measures (ready to implement in BI)
 
 ## Repository Structure
-- `sql/`: star schema DDL, views, KPI queries, BI marts
+- `sql/`: star schema DDL, views, KPI queries, BI marts, cart/order/payment tables
 - `src/`: data generator, loaders, extractors, analytics pipeline
 - `backend/`: FastAPI server for admin/customer APIs and web UIs
+  - `backend/routes/api_customer.py`: cart, checkout, order/payment lifecycle
+  - `backend/routes/api_auth.py`: OTP + JWT auth, `/me` endpoint
+  - `backend/routes/api_admin.py`: admin APIs (JWT or admin-key auth)
 - `frontend/`: customer storefront (/shop) and admin UI assets
 - `notebooks/`: EDA, RFM segmentation, forecasting (notebook-friendly)
 - `docs/`: data dictionary, KPI definitions, architecture
 - `dashboards/`: Power BI/Tableau specs + DAX measures
 - `data/`: generated raw and processed extracts (created at runtime)
+
+## Transactional E-commerce Features (Implemented)
+
+### Cart
+- Persistent cart per customer (`customer_cart_items` table)
+- APIs: `GET/POST/PUT/DELETE /api/customer/cart?customer_id=...`
+
+### Checkout & Order Lifecycle
+- **Atomic order creation**: `POST /api/customer/checkout/start`
+  - Creates `ORDER_CREATED` + `PAYMENT_PENDING` in one DB transaction
+  - Returns `order_id` and `payment_id`
+- **Payment simulation**: `POST /api/customer/orders/{order_id}/simulate-payment?customer_id=...`
+  - Body: `{ "success": true }` or `{ "success": false, "failure_reason": "BANK_DOWN" }`
+  - Success: `ORDER_CONFIRMED` + `PAYMENT_SUCCESS` + creates shipment
+  - Failure: `ORDER_CANCELLED` + `PAYMENT_FAILED` + records cancellation reason
+- **State machine**: `ORDER_CREATED → PAYMENT_PENDING → {PAYMENT_SUCCESS → ORDER_CONFIRMED} | {PAYMENT_FAILED → ORDER_CANCELLED}`
+- **Rollback**: All operations use DB transactions; any error rolls back without partial writes
+
+### Auth & Access
+- OTP-based signup/login (`/api/auth/request-otp`, `/api/auth/verify-otp`)
+- JWT tokens (`/api/auth/token`) with role-based access (`customer`/`admin`)
+- Admin endpoints accept either JWT (role=admin) or X-Admin-Key header
+
+### Where the Code Lives
+- Cart: `backend/routes/api_customer.py` (`/cart` endpoints)
+- Checkout & payment lifecycle: `backend/routes/api_customer.py` (`/checkout/start`, `/orders/{id}/simulate-payment`)
+- Auth: `backend/routes/api_auth.py` and `backend/security.py`
+- Models: `backend/models.py` (`CheckoutStartOut`, `PaymentSimulateIn/Out`, `CartSummaryOut`)
+- DB schema: `sql/10_shop_features.sql` (cart table), `sql/00_schema.sql` (orders/payments)
 
 ## Step-by-step (Local + Public URL)
 
@@ -57,11 +92,10 @@ python -m src.load_to_postgres
 python -m src.run_sql --sql sql/02_views.sql
 ```
 
-### 5) (Optional) Enable OTP Sign-in tables
-Only needed if you want OTP-based auth endpoints:
-
+### 5) Enable auth + cart tables
 ```bash
 python3 -m src.run_sql --sql sql/07_app_auth.sql
+python3 -m src.run_sql --sql sql/10_shop_features.sql
 ```
 
 ### 6) Start the FastAPI backend (serves Shop + Admin)
@@ -73,6 +107,7 @@ python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ### 7) Open the local URLs
 - Shop: http://localhost:8000/shop/
 - Admin: http://localhost:8000/admin/
+- API docs: http://localhost:8000/docs
 
 ### 8) Admin login
 - Default Admin Username: `admin`
@@ -92,6 +127,7 @@ Current public URL:
 Then open:
 - Shop: https://accessed-taken-grande-houston.trycloudflare.com/shop/
 - Admin: https://accessed-taken-grande-houston.trycloudflare.com/admin/
+- API docs: https://accessed-taken-grande-houston.trycloudflare.com/docs
 
 Note: this `trycloudflare.com` URL **changes whenever you restart** `cloudflared`.
 
@@ -101,6 +137,7 @@ Use a custom domain + Cloudflare **named tunnel** (stable URL).
 ### Troubleshooting
 - If UI pages are not loading, confirm the backend is running on `http://127.0.0.1:8000`.
 - If the public URL stops working, restart the quick tunnel command and use the new printed `trycloudflare.com` URL.
+- If cart/checkout APIs return 500, ensure you ran the SQL in step 5.
 
 ## One-command pipeline
 After PostgreSQL is running:
@@ -118,13 +155,6 @@ This simulates a production-style incremental load with:
 ### 1) Ensure incremental objects exist (staging + upsert functions)
 ```bash
 python -m src.run_sql --sql sql/04_incremental_refresh.sql --stop-on-error
-```
-
-### (Optional) Enable OTP Sign-in (Amazon-like)
-Create auth tables used by `/api/auth/request-otp` and `/api/auth/verify-otp`:
-
-```bash
-python3 -m src.run_sql --sql sql/07_app_auth.sql
 ```
 
 ### 2) Snapshot KPIs (before)
@@ -170,3 +200,4 @@ Dashboards and Python reuse the same definitions.
 ## Notes
 - Default `--scale small` generates a sample sized dataset for laptops.
 - The schema and scripts are designed to scale conceptually to 100M+ orders/year with incremental/streaming ingestion patterns documented in `docs/architecture.md`.
+- Transactional features (cart, checkout, payments) are implemented with real DB transactions and explicit state machines suitable for interview demonstration.

@@ -17,6 +17,8 @@ const GC = {
     emailExists: '/api/auth/email-exists',
     login: '/api/auth/login',
     createOrder: '/api/customer/orders',
+    checkoutStart: '/api/customer/checkout/start',
+    simulatePayment: (orderId) => `/api/customer/orders/${encodeURIComponent(orderId)}/simulate-payment`,
     cancelOrder: (id) => `/api/customer/orders/${encodeURIComponent(id)}/cancel`,
     promoValidate: '/api/customer/promos/validate',
     ordersByCustomer: (id) => `/api/customer/orders/by-customer/${encodeURIComponent(id)}`,
@@ -2724,8 +2726,6 @@ async function initCheckout() {
             customer_id: cust ? cust.customer_id : null,
             promo_code: appliedPromoCode || null,
             payment_method: pmSel ? pmSel.value : 'UPI',
-            simulate_payment_failure: simulate,
-            failure_reason: simulate ? (fr || 'BANK_DECLINED') : null,
             address: {
               recipient_name: recipientName ? String(recipientName.value || '').trim() : '',
               phone: recipientPhone ? String(recipientPhone.value || '').trim() : '',
@@ -2738,12 +2738,22 @@ async function initCheckout() {
             },
           };
 
-          const res = await apiFetch(GC.api.createOrder, { method: 'POST', body: JSON.stringify(req) });
+          const start = await apiFetch(GC.api.checkoutStart, { method: 'POST', body: JSON.stringify(req) });
+          const orderId = start && start.order_id ? Number(start.order_id) : null;
+          if (!orderId) throw new Error('Checkout failed: missing order_id');
 
-          if (res && String(res.payment_status || '').toUpperCase() === 'FAILED') {
-            toast('Payment failed', `Order #${res.order_id} marked as failed.`, 'danger');
+          const payRes = await apiFetch(
+            `${GC.api.simulatePayment(orderId)}?customer_id=${encodeURIComponent(cust.customer_id)}`,
+            {
+              method: 'POST',
+              body: JSON.stringify({ success: !simulate, failure_reason: simulate ? (fr || 'BANK_DECLINED') : null }),
+            }
+          );
+
+          if (payRes && String(payRes.payment_status || '').toUpperCase() === 'PAYMENT_FAILED') {
+            toast('Payment failed', `Order #${orderId} cancelled due to payment failure.`, 'danger');
             await track('PAYMENT_FAILED', {
-              order_id: Number(res.order_id),
+              order_id: Number(orderId),
               failure_reason: simulate ? (fr || 'BANK_DECLINED') : null,
             });
             return;
@@ -2752,18 +2762,18 @@ async function initCheckout() {
           const overlay = qs('#orderConfirmOverlay');
           const overlayText = qs('#orderConfirmText');
           const confetti = qs('#orderConfirmConfetti');
-          if (overlayText) overlayText.textContent = `Order #${res.order_id} confirmed`;
+          if (overlayText) overlayText.textContent = `Order #${orderId} confirmed`;
           if (overlay) {
             overlay.classList.remove('d-none');
             overlay.setAttribute('aria-hidden', 'false');
           }
           renderConfetti(confetti, 30);
 
-          await track('ORDER_PLACED', { order_id: Number(res.order_id) });
+          await track('ORDER_PLACED', { order_id: Number(orderId) });
 
           saveCart({ items: [] });
           await sleep(5800);
-          window.location.href = 'orders.html';
+          window.location.href = `order.html?order_id=${encodeURIComponent(orderId)}`;
         } catch (err) {
           toast('Checkout failed', err.message || 'Unable to place order', 'danger');
         } finally {
