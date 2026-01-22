@@ -16,6 +16,10 @@ GlobalCart 360 is a **dual-purpose system**:
   - Lifecycle tests: `tests/test_checkout_lifecycle.py`
   - Storefront UI calling the lifecycle: `frontend/shop/checkout.html` + `frontend/shop/shop.js`
 
+**Scope note:** this repository is not positioned as a full production e-commerce store (real payment provider integration, inventory reservation/stock deduction, fraud, PCI/compliance, etc.). Instead, it is a resume-ready **analytics + transactional demo** with a clear lifecycle and realistic architecture patterns.
+
+For the “mixed concerns” story (analytics + APIs + UI + BI assets), see: `docs/architecture.md`.
+
 ## Tech Stack
 - SQL: PostgreSQL
 - Python: FastAPI, pandas, numpy, seaborn/matplotlib, scikit-learn, statsmodels
