@@ -29,6 +29,23 @@ class CartItemIn(BaseModel):
     qty: int = Field(ge=1, le=20)
 
 
+class CartItemOut(ProductOut):
+    qty: int
+    line_gross: float
+    line_discount: float
+    line_tax: float
+    line_total: float
+
+
+class CartSummaryOut(BaseModel):
+    customer_id: int
+    items: List[CartItemOut]
+    gross_amount: float
+    discount_amount: float
+    tax_amount: float
+    net_amount: float
+
+
 class OrderAddressIn(BaseModel):
     recipient_name: str = Field(max_length=200)
     phone: str = Field(max_length=30)
@@ -99,6 +116,26 @@ class OrderCreatedOut(BaseModel):
     payment_status: Optional[str] = None
     promo_code: Optional[str] = None
     promo_discount_amount: Optional[float] = None
+
+
+class CheckoutStartOut(BaseModel):
+    order_id: int
+    payment_id: int
+    order_status: str
+    payment_status: str
+    amount: float
+
+
+class PaymentSimulateIn(BaseModel):
+    success: bool
+    failure_reason: Optional[str] = Field(default=None, max_length=80)
+
+
+class PaymentSimulateOut(BaseModel):
+    order_id: int
+    payment_id: int
+    order_status: str
+    payment_status: str
 
 
 class FunnelEventIn(BaseModel):

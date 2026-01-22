@@ -7,6 +7,18 @@ CREATE TABLE IF NOT EXISTS globalcart.customer_wishlist (
   PRIMARY KEY (customer_id, product_id)
 );
 
+CREATE TABLE IF NOT EXISTS globalcart.customer_cart_items (
+  customer_id BIGINT NOT NULL REFERENCES globalcart.dim_customer(customer_id),
+  product_id BIGINT NOT NULL REFERENCES globalcart.dim_product(product_id),
+  qty INTEGER NOT NULL CHECK (qty >= 1 AND qty <= 20),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (customer_id, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_cart_items_customer_updated
+ON globalcart.customer_cart_items (customer_id, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS globalcart.promo_codes (
   code VARCHAR(40) PRIMARY KEY,
   discount_type VARCHAR(20) NOT NULL,

@@ -13,8 +13,11 @@ import psycopg
 
 from ..db import get_conn
 from ..models import (
+    CartItemIn,
+    CartSummaryOut,
     CancelOrderIn,
     CancelOrderOut,
+    CheckoutStartOut,
     CreateOrderRequest,
     CustomerEmailOut,
     CustomerResolveIn,
@@ -24,6 +27,8 @@ from ..models import (
     OrderTimelineOut,
     OrderTimelineStageOut,
     OrdersByCustomerOut,
+    PaymentSimulateIn,
+    PaymentSimulateOut,
     ProductRatingSummaryOut,
     ProductReviewIn,
     ProductReviewOut,
@@ -216,6 +221,298 @@ def _next_id(conn, table: str, pk: str) -> int:
         cur.execute(f"SELECT COALESCE(MAX({pk}), 0) + 1 FROM {table};")
         row = cur.fetchone()
         return int(row[0])
+
+
+def _product_map(conn, product_ids: List[int]) -> Dict[int, dict]:
+    if not product_ids:
+        return {}
+
+    placeholders = ",".join(["%s"] * len(product_ids))
+    sql = f"""
+        SELECT product_id, sku, product_name, category_l1, category_l2, brand, unit_cost, list_price
+        FROM globalcart.vw_customer_products
+        WHERE product_id IN ({placeholders});
+    """
+
+    with conn.cursor() as cur:
+        cur.execute(sql, tuple(product_ids))
+        rows = cur.fetchall()
+
+    out: Dict[int, dict] = {}
+    for r in rows:
+        out[int(r[0])] = {
+            "product_id": int(r[0]),
+            "sku": str(r[1]),
+            "product_name": str(r[2]),
+            "category_l1": str(r[3]),
+            "category_l2": str(r[4]),
+            "brand": str(r[5]),
+            "unit_cost": float(r[6]),
+            "list_price": float(r[7]),
+        }
+    return out
+
+
+def _cart_summary(conn, customer_id: int) -> CartSummaryOut:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT product_id, qty
+            FROM globalcart.customer_cart_items
+            WHERE customer_id = %s
+            ORDER BY updated_at DESC;
+            """,
+            (int(customer_id),),
+        )
+        rows = cur.fetchall()
+
+    items_in = [(int(r[0]), int(r[1])) for r in rows]
+    prod = _product_map(conn, [pid for (pid, _) in items_in])
+    missing = [pid for (pid, _) in items_in if pid not in prod]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Cart contains invalid product_ids: {missing}")
+
+    gross_amount = 0.0
+    discount_amount = 0.0
+    tax_amount = 0.0
+    net_amount = 0.0
+
+    out_items = []
+    for (pid, qty) in items_in:
+        p = prod[pid]
+        list_price = float(p["list_price"])
+        disc_pct = _stable_discount_pct(pid)
+        sell_price = round(list_price * (1 - disc_pct / 100.0), 2)
+
+        line_gross = round(list_price * qty, 2)
+        line_discount = round((list_price - sell_price) * qty, 2)
+        line_tax = round(0.07 * (sell_price * qty), 2)
+        line_total = round((sell_price * qty) + line_tax, 2)
+
+        gross_amount += line_gross
+        discount_amount += line_discount
+        tax_amount += line_tax
+        net_amount += line_total
+
+        out_items.append(
+            {
+                "product_id": pid,
+                "sku": p["sku"],
+                "product_name": p["product_name"],
+                "category_l1": p["category_l1"],
+                "category_l2": p["category_l2"],
+                "brand": p["brand"],
+                "list_price": float(list_price),
+                "discount_pct": int(disc_pct),
+                "sell_price": float(sell_price),
+                "image_url": _product_photo_url(
+                    seed=f"{p['sku']}:{pid}",
+                    label=p["product_name"],
+                    category_l1=p["category_l1"],
+                    category_l2=p["category_l2"],
+                    product_id=pid,
+                    sku=p["sku"],
+                ),
+                "qty": int(qty),
+                "line_gross": float(line_gross),
+                "line_discount": float(line_discount),
+                "line_tax": float(line_tax),
+                "line_total": float(line_total),
+            }
+        )
+
+    return CartSummaryOut(
+        customer_id=int(customer_id),
+        items=out_items,
+        gross_amount=float(round(gross_amount, 2)),
+        discount_amount=float(round(discount_amount, 2)),
+        tax_amount=float(round(tax_amount, 2)),
+        net_amount=float(round(net_amount, 2)),
+    )
+
+
+def _send_outbox_email_safe(conn, customer_id: int, kind: str, subject: str, body: str, order_id: int) -> None:
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('globalcart.app_users');")
+            has_users = cur.fetchone()[0] is not None
+            cur.execute("SELECT to_regclass('globalcart.app_email_outbox');")
+            has_outbox = cur.fetchone()[0] is not None
+            if not (has_users and has_outbox):
+                return
+
+            cur.execute(
+                """
+                SELECT email
+                FROM globalcart.app_users
+                WHERE customer_id = %s
+                ORDER BY updated_at DESC
+                LIMIT 1;
+                """,
+                (int(customer_id),),
+            )
+            er = cur.fetchone()
+            if er is None:
+                return
+            to_email = str(er[0] or "").strip()
+            if not to_email:
+                return
+
+            cur.execute(
+                """
+                INSERT INTO globalcart.app_email_outbox (customer_id, to_email, subject, body, kind, order_id)
+                VALUES (%s, %s, %s, %s, %s, %s);
+                """,
+                (int(customer_id), to_email, str(subject), str(body), str(kind), int(order_id)),
+            )
+    except Exception:
+        return
+
+
+@router.get("/cart", response_model=CartSummaryOut)
+def cart_get(
+    customer_id: int = Query(..., ge=1),
+    admin_key: str | None = Header(None, alias="X-Admin-Key"),
+):
+    _reject_admin(admin_key)
+    try:
+        with get_conn() as conn:
+            conn.execute("SET TIME ZONE 'UTC';", prepare=False)
+            return _cart_summary(conn, customer_id=int(customer_id))
+    except psycopg.OperationalError:
+        return CartSummaryOut(customer_id=int(customer_id), items=[], gross_amount=0.0, discount_amount=0.0, tax_amount=0.0, net_amount=0.0)
+    except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Cart tables not found. Run: python3 -m src.run_sql --sql sql/10_shop_features.sql"
+            ),
+        )
+
+
+@router.post("/cart")
+def cart_add(
+    payload: CartItemIn,
+    customer_id: int = Query(..., ge=1),
+    admin_key: str | None = Header(None, alias="X-Admin-Key"),
+):
+    _reject_admin(admin_key)
+    now_ts = _utc_now()
+    try:
+        with get_conn() as conn:
+            conn.execute("SET TIME ZONE 'UTC';", prepare=False)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO globalcart.customer_cart_items (customer_id, product_id, qty, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (customer_id, product_id) DO UPDATE SET
+                      qty = LEAST(20, globalcart.customer_cart_items.qty + EXCLUDED.qty),
+                      updated_at = EXCLUDED.updated_at;
+                    """,
+                    (int(customer_id), int(payload.product_id), int(payload.qty), now_ts, now_ts),
+                )
+            conn.commit()
+            return {"detail": "Added"}
+    except psycopg.OperationalError:
+        return {"detail": "Added"}
+    except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Cart tables not found. Run: python3 -m src.run_sql --sql sql/10_shop_features.sql"
+            ),
+        )
+
+
+@router.put("/cart")
+def cart_update(
+    payload: CartItemIn,
+    customer_id: int = Query(..., ge=1),
+    admin_key: str | None = Header(None, alias="X-Admin-Key"),
+):
+    _reject_admin(admin_key)
+    now_ts = _utc_now()
+    try:
+        with get_conn() as conn:
+            conn.execute("SET TIME ZONE 'UTC';", prepare=False)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO globalcart.customer_cart_items (customer_id, product_id, qty, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (customer_id, product_id) DO UPDATE SET
+                      qty = EXCLUDED.qty,
+                      updated_at = EXCLUDED.updated_at;
+                    """,
+                    (int(customer_id), int(payload.product_id), int(payload.qty), now_ts, now_ts),
+                )
+            conn.commit()
+            return {"detail": "Updated"}
+    except psycopg.OperationalError:
+        return {"detail": "Updated"}
+    except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Cart tables not found. Run: python3 -m src.run_sql --sql sql/10_shop_features.sql"
+            ),
+        )
+
+
+@router.delete("/cart/{product_id}")
+def cart_remove(
+    product_id: int,
+    customer_id: int = Query(..., ge=1),
+    admin_key: str | None = Header(None, alias="X-Admin-Key"),
+):
+    _reject_admin(admin_key)
+    try:
+        with get_conn() as conn:
+            conn.execute("SET TIME ZONE 'UTC';", prepare=False)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM globalcart.customer_cart_items WHERE customer_id = %s AND product_id = %s;",
+                    (int(customer_id), int(product_id)),
+                )
+            conn.commit()
+            return {"detail": "Removed"}
+    except psycopg.OperationalError:
+        return {"detail": "Removed"}
+    except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Cart tables not found. Run: python3 -m src.run_sql --sql sql/10_shop_features.sql"
+            ),
+        )
+
+
+@router.delete("/cart")
+def cart_clear(
+    customer_id: int = Query(..., ge=1),
+    admin_key: str | None = Header(None, alias="X-Admin-Key"),
+):
+    _reject_admin(admin_key)
+    try:
+        with get_conn() as conn:
+            conn.execute("SET TIME ZONE 'UTC';", prepare=False)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM globalcart.customer_cart_items WHERE customer_id = %s;",
+                    (int(customer_id),),
+                )
+            conn.commit()
+            return {"detail": "Cleared"}
+    except psycopg.OperationalError:
+        return {"detail": "Cleared"}
+    except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Cart tables not found. Run: python3 -m src.run_sql --sql sql/10_shop_features.sql"
+            ),
+        )
 
 
 def _pick_any(conn, table: str, id_col: str) -> int:
@@ -1624,6 +1921,351 @@ def create_order(req: CreateOrderRequest, admin_key: str | None = Header(None, a
         logger = logging.getLogger("api_customer")
         logger.exception("Unexpected error in create_order")
         raise HTTPException(status_code=500, detail=f"Unexpected error while creating order: {e}")
+
+
+@router.post("/checkout/start", response_model=CheckoutStartOut)
+def checkout_start(req: CreateOrderRequest, admin_key: str | None = Header(None, alias="X-Admin-Key")) -> CheckoutStartOut:
+    _reject_admin(admin_key)
+
+    if not req.items:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+    if req.customer_id is None:
+        raise HTTPException(status_code=401, detail="Sign in required to place an order")
+
+    now_ts = _utc_now()
+    payment_method = str(getattr(req, "payment_method", "UPI") or "UPI")
+
+    try:
+        with get_conn() as conn:
+            conn.execute("SET TIME ZONE 'UTC';", prepare=False)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT geo_id FROM globalcart.vw_customer_customers WHERE customer_id = %s",
+                        (int(req.customer_id),),
+                    )
+                    row = cur.fetchone()
+                if row is None:
+                    raise HTTPException(status_code=400, detail="Invalid customer_id")
+                customer_id = int(req.customer_id)
+                geo_id = int(row[0])
+                fc_id = _pick_any(conn, "globalcart.vw_customer_fc", "fc_id")
+
+                order_id = _next_id(conn, "globalcart.fact_orders", "order_id")
+                payment_id = _next_id(conn, "globalcart.fact_payments", "payment_id")
+                next_item_id = _next_id(conn, "globalcart.fact_order_items", "order_item_id")
+
+                product_ids = [int(i.product_id) for i in req.items]
+                prod = _product_map(conn, product_ids)
+                missing = [pid for pid in product_ids if pid not in prod]
+                if missing:
+                    raise HTTPException(status_code=400, detail=f"Invalid product_ids: {missing}")
+
+                gross_amount = 0.0
+                discount_amount = 0.0
+                tax_amount = 0.0
+                net_amount = 0.0
+                order_items_rows: List[tuple] = []
+
+                for item in req.items:
+                    pid = int(item.product_id)
+                    qty = int(item.qty)
+                    list_price = float(prod[pid]["list_price"])
+                    unit_cost = float(prod[pid]["unit_cost"])
+
+                    disc = _stable_discount_pct(pid)
+                    unit_sell = round(list_price * (1 - disc / 100.0), 2)
+
+                    line_gross = round(list_price * qty, 2)
+                    line_discount = round((list_price - unit_sell) * qty, 2)
+                    line_tax = round(0.07 * (unit_sell * qty), 2)
+                    line_net = round((unit_sell * qty) + line_tax, 2)
+
+                    gross_amount += line_gross
+                    discount_amount += line_discount
+                    tax_amount += line_tax
+                    net_amount += line_net
+
+                    order_items_rows.append(
+                        (
+                            next_item_id,
+                            order_id,
+                            pid,
+                            qty,
+                            round(list_price, 2),
+                            unit_sell,
+                            round(unit_cost, 2),
+                            line_discount,
+                            line_tax,
+                            line_net,
+                            now_ts,
+                            now_ts,
+                        )
+                    )
+                    next_item_id += 1
+
+                gross_amount = round(gross_amount, 2)
+                discount_amount = round(discount_amount, 2)
+                tax_amount = round(tax_amount, 2)
+                net_amount = round(net_amount, 2)
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO globalcart.fact_orders (
+                            order_id, customer_id, geo_id, order_ts, order_status, channel, currency,
+                            gross_amount, discount_amount, tax_amount, net_amount, created_at, updated_at
+                        )
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);
+                        """,
+                        (
+                            int(order_id),
+                            int(customer_id),
+                            int(geo_id),
+                            now_ts,
+                            "ORDER_CREATED",
+                            req.channel,
+                            req.currency or "INR",
+                            gross_amount,
+                            discount_amount,
+                            tax_amount,
+                            net_amount,
+                            now_ts,
+                            now_ts,
+                        ),
+                    )
+
+                    for row in order_items_rows:
+                        cur.execute(
+                            """
+                            INSERT INTO globalcart.fact_order_items (
+                                order_item_id, order_id, product_id, qty,
+                                unit_list_price, unit_sell_price, unit_cost,
+                                line_discount, line_tax, line_net_revenue,
+                                created_at, updated_at
+                            )
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);
+                            """,
+                            row,
+                        )
+
+                    cur.execute(
+                        """
+                        INSERT INTO globalcart.fact_payments (
+                            payment_id, order_id, payment_method, payment_status, payment_provider,
+                            amount, authorized_ts, captured_ts, failure_reason, refund_amount,
+                            chargeback_flag, created_at, updated_at
+                        )
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);
+                        """,
+                        (
+                            int(payment_id),
+                            int(order_id),
+                            payment_method,
+                            "PAYMENT_PENDING",
+                            "DEMO",
+                            float(net_amount),
+                            now_ts,
+                            None,
+                            None,
+                            0.0,
+                            False,
+                            now_ts,
+                            now_ts,
+                        ),
+                    )
+
+                conn.commit()
+                return CheckoutStartOut(
+                    order_id=int(order_id),
+                    payment_id=int(payment_id),
+                    order_status="ORDER_CREATED",
+                    payment_status="PAYMENT_PENDING",
+                    amount=float(net_amount),
+                )
+            except Exception:
+                conn.rollback()
+                raise
+
+    except psycopg.OperationalError:
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL unavailable. Start DB and rerun the pipeline.",
+        )
+    except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Warehouse tables not found. Run: python3 -m src.run_sql --sql sql/00_schema.sql and load/generate data first."
+            ),
+        )
+
+
+@router.post("/orders/{order_id}/simulate-payment", response_model=PaymentSimulateOut)
+def simulate_payment(
+    order_id: int,
+    payload: PaymentSimulateIn,
+    customer_id: int = Query(..., ge=1),
+    admin_key: str | None = Header(None, alias="X-Admin-Key"),
+) -> PaymentSimulateOut:
+    _reject_admin(admin_key)
+    now_ts = _utc_now()
+
+    try:
+        with get_conn() as conn:
+            conn.execute("SET TIME ZONE 'UTC';", prepare=False)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT customer_id, order_status, net_amount
+                        FROM globalcart.fact_orders
+                        WHERE order_id = %s;
+                        """,
+                        (int(order_id),),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        raise HTTPException(status_code=404, detail="Order not found")
+                    if int(row[0]) != int(customer_id):
+                        raise HTTPException(status_code=403, detail="Order does not belong to this customer")
+
+                    current_status = str(row[1] or "").upper()
+                    amount = float(row[2] or 0.0)
+                    if current_status not in {"ORDER_CREATED", "PAYMENT_PENDING"}:
+                        raise HTTPException(status_code=400, detail=f"Order not in payable state: {current_status}")
+
+                    cur.execute(
+                        """
+                        SELECT payment_id, payment_status
+                        FROM globalcart.fact_payments
+                        WHERE order_id = %s
+                        ORDER BY payment_id DESC
+                        LIMIT 1;
+                        """,
+                        (int(order_id),),
+                    )
+                    pr = cur.fetchone()
+                    if pr is None:
+                        raise HTTPException(status_code=500, detail="Payment record missing")
+                    payment_id = int(pr[0])
+                    payment_status = str(pr[1] or "").upper()
+                    if payment_status not in {"PAYMENT_PENDING"}:
+                        raise HTTPException(status_code=400, detail=f"Payment not pending: {payment_status}")
+
+                    if payload.success:
+                        cur.execute(
+                            """
+                            UPDATE globalcart.fact_payments
+                            SET payment_status = 'PAYMENT_SUCCESS', captured_ts = %s, failure_reason = NULL, updated_at = %s
+                            WHERE payment_id = %s;
+                            """,
+                            (now_ts, now_ts, int(payment_id)),
+                        )
+                        cur.execute(
+                            """
+                            UPDATE globalcart.fact_orders
+                            SET order_status = 'ORDER_CONFIRMED', updated_at = %s
+                            WHERE order_id = %s;
+                            """,
+                            (now_ts, int(order_id)),
+                        )
+
+                        fc_id = _pick_any(conn, "globalcart.dim_fc", "fc_id")
+                        shipment_id = _next_id(conn, "globalcart.fact_shipments", "shipment_id")
+                        cur.execute(
+                            """
+                            INSERT INTO globalcart.fact_shipments (
+                                shipment_id, order_id, fc_id, carrier, shipped_ts,
+                                promised_delivery_dt, delivered_dt, shipping_cost,
+                                sla_breached_flag, created_at, updated_at
+                            )
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);
+                            """,
+                            (
+                                int(shipment_id),
+                                int(order_id),
+                                int(fc_id),
+                                "Delhivery",
+                                now_ts,
+                                (now_ts + timedelta(days=3)).date(),
+                                None,
+                                49.0,
+                                False,
+                                now_ts,
+                                now_ts,
+                            ),
+                        )
+
+                        _send_outbox_email_safe(
+                            conn,
+                            customer_id=int(customer_id),
+                            kind="ORDER_CONFIRMED",
+                            subject=f"Order confirmed #{order_id}",
+                            body=f"Your order #{order_id} has been confirmed. Total: {amount}.",
+                            order_id=int(order_id),
+                        )
+
+                        conn.commit()
+                        return PaymentSimulateOut(
+                            order_id=int(order_id),
+                            payment_id=int(payment_id),
+                            order_status="ORDER_CONFIRMED",
+                            payment_status="PAYMENT_SUCCESS",
+                        )
+
+                    reason = (payload.failure_reason or "PAYMENT_FAILED").strip() or "PAYMENT_FAILED"
+                    cur.execute(
+                        """
+                        UPDATE globalcart.fact_payments
+                        SET payment_status = 'PAYMENT_FAILED', captured_ts = NULL, failure_reason = %s, updated_at = %s
+                        WHERE payment_id = %s;
+                        """,
+                        (reason, now_ts, int(payment_id)),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE globalcart.fact_orders
+                        SET order_status = 'ORDER_CANCELLED', updated_at = %s
+                        WHERE order_id = %s;
+                        """,
+                        (now_ts, int(order_id)),
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO globalcart.order_cancellations (order_id, customer_id, reason)
+                        VALUES (%s, %s, %s);
+                        """,
+                        (int(order_id), int(customer_id), reason),
+                    )
+
+                    _send_outbox_email_safe(
+                        conn,
+                        customer_id=int(customer_id),
+                        kind="PAYMENT_FAILED",
+                        subject=f"Payment failed for order #{order_id}",
+                        body=f"Your payment failed for order #{order_id}. Please retry.",
+                        order_id=int(order_id),
+                    )
+
+                conn.commit()
+                return PaymentSimulateOut(
+                    order_id=int(order_id),
+                    payment_id=int(payment_id),
+                    order_status="ORDER_CANCELLED",
+                    payment_status="PAYMENT_FAILED",
+                )
+
+            except Exception:
+                conn.rollback()
+                raise
+
+    except psycopg.OperationalError:
+        raise HTTPException(status_code=503, detail="PostgreSQL unavailable")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to simulate payment: {e}")
 
 
 @router.get("/orders/by-customer/{customer_id}", response_model=OrdersByCustomerOut)
