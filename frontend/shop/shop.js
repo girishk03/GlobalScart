@@ -3,6 +3,7 @@ const GC = {
     sessionId: 'gc_session_id',
     customer: 'gc_customer',
     cart: 'gc_cart',
+    accessToken: 'gc_access_token',
   },
   api: {
     products: '/api/customer/products',
@@ -16,6 +17,7 @@ const GC = {
     signupVerifyOtp: '/api/auth/signup/verify-otp',
     emailExists: '/api/auth/email-exists',
     login: '/api/auth/login',
+    token: '/api/auth/token',
     createOrder: '/api/customer/orders',
     checkoutStart: '/api/customer/checkout/start',
     simulatePayment: (orderId) => `/api/customer/orders/${encodeURIComponent(orderId)}/simulate-payment`,
@@ -563,9 +565,35 @@ function getCustomer() {
   }
 }
 
+function getAccessToken() {
+  try {
+    const raw = localStorage.getItem(GC.storage.accessToken);
+    const t = String(raw || '').trim();
+    return t || null;
+  } catch {
+    return null;
+  }
+}
+
+function setAccessToken(token) {
+  const t = String(token || '').trim();
+  if (!t) {
+    try {
+      localStorage.removeItem(GC.storage.accessToken);
+    } catch {
+    }
+    return;
+  }
+  try {
+    localStorage.setItem(GC.storage.accessToken, t);
+  } catch {
+  }
+}
+
 function setCustomer(customer) {
   if (!customer) {
     localStorage.removeItem(GC.storage.customer);
+    setAccessToken(null);
     return;
   }
   localStorage.setItem(GC.storage.customer, JSON.stringify(customer));
@@ -642,10 +670,12 @@ async function apiFetch(url, options = {}) {
     // ignore
   }
 
+  const token = getAccessToken();
   const resp = await fetch(finalUrl, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -962,6 +992,15 @@ async function loginWithPassword(email, password) {
   return apiFetch(GC.api.login, { method: 'POST', body: JSON.stringify({ email: e, password: p }) });
 }
 
+async function fetchJwtToken(email, password) {
+  const e = String(email || '').trim().toLowerCase();
+  const p = String(password || '');
+  if (!e || !p) return null;
+  const res = await apiFetch(GC.api.token, { method: 'POST', body: JSON.stringify({ email: e, password: p }) });
+  if (res && res.access_token) return String(res.access_token);
+  return null;
+}
+
 function bindGlobalNav() {
   getSessionId();
   updateNavCustomer();
@@ -1007,6 +1046,7 @@ async function initLogin() {
   const signupEmailExistsWarn = qs('#signupEmailExistsWarn');
 
   let emailTaken = false;
+  let signupPasswordCache = '';
 
   const pwdRuleLen = qs('#pwdRuleLen');
   const pwdRuleUpper = qs('#pwdRuleUpper');
@@ -1308,6 +1348,12 @@ async function initLogin() {
       try {
         const customer = await loginWithPassword(email, password);
         setCustomer(customer);
+        try {
+          const token = await fetchJwtToken(email, password);
+          if (token) setAccessToken(token);
+        } catch {
+          // If token issuance fails, keep session as customer_id-based demo.
+        }
         toast('Signed in', `Welcome back!`, 'success');
         window.location.href = withIntroParam(next);
       } catch (e) {
@@ -1436,6 +1482,12 @@ async function initLogin() {
     try {
       const data = await signupVerifyOtp(email, otp);
       setCustomer(data);
+      try {
+        const token = await fetchJwtToken(email, signupPasswordCache);
+        if (token) setAccessToken(token);
+      } catch {
+        // Token issuance optional for demo
+      }
       toast('Account verified', `Welcome ${data.display_name || data.email}.`, 'success');
       window.location.href = withIntroParam(next);
     } catch (e) {
@@ -1453,6 +1505,12 @@ async function initLogin() {
     try {
       const data = await loginWithPassword(email, password);
       setCustomer(data);
+      try {
+        const token = await fetchJwtToken(email, password);
+        if (token) setAccessToken(token);
+      } catch {
+        // If token issuance fails, keep session as customer_id-based demo.
+      }
       toast('Signed in', `Welcome ${data.display_name || data.email}.`, 'success');
       window.location.href = withIntroParam(next);
     } catch (e) {
@@ -1478,7 +1536,11 @@ async function initLogin() {
     });
   }
 
-  if (signupPasswordInput) signupPasswordInput.addEventListener('input', updatePasswordUi);
+  if (signupPasswordInput) {
+    signupPasswordInput.addEventListener('input', () => {
+      signupPasswordCache = String(signupPasswordInput.value || '');
+    });
+  }
   if (signupConfirmPasswordInput) signupConfirmPasswordInput.addEventListener('input', updatePasswordUi);
   if (signupEmailInput) {
     signupEmailInput.addEventListener('blur', refreshEmailTaken);

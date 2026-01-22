@@ -6,6 +6,16 @@ GlobalCart 360 is a **dual-purpose system**:
 
 > This repo demonstrates both analytical and transactional patterns. The storefront is a demo, but the order/payment flow is implemented with real database transactions and explicit state machines.
 
+## Project Summary (What reviewers should look at)
+- **Transaction processing**: cart → checkout → payment lifecycle → order confirmation/cancellation
+- **Analytics**: star schema + KPI views + incremental refresh + BI marts
+- **Admin vs customer flows**: role-based access + protected admin endpoints
+- **Evidence**:
+  - API docs: `http://localhost:8000/docs`
+  - Transaction lifecycle code: `backend/routes/api_customer.py`
+  - Lifecycle tests: `tests/test_checkout_lifecycle.py`
+  - Storefront UI calling the lifecycle: `frontend/shop/checkout.html` + `frontend/shop/shop.js`
+
 ## Tech Stack
 - SQL: PostgreSQL
 - Python: FastAPI, pandas, numpy, seaborn/matplotlib, scikit-learn, statsmodels
@@ -31,13 +41,14 @@ GlobalCart 360 is a **dual-purpose system**:
 
 ### Cart
 - Persistent cart per customer (`customer_cart_items` table)
-- APIs: `GET/POST/PUT/DELETE /api/customer/cart?customer_id=...`
+- APIs: `GET/POST/PUT/DELETE /api/customer/cart`
+- Auth: Send `Authorization: Bearer <JWT>` (recommended). Query `customer_id` is supported only as a fallback.
 
 ### Checkout & Order Lifecycle
 - **Atomic order creation**: `POST /api/customer/checkout/start`
   - Creates `ORDER_CREATED` + `PAYMENT_PENDING` in one DB transaction
   - Returns `order_id` and `payment_id`
-- **Payment simulation**: `POST /api/customer/orders/{order_id}/simulate-payment?customer_id=...`
+- **Payment completion (simulated)**: `POST /api/customer/orders/{order_id}/simulate-payment`
   - Body: `{ "success": true }` or `{ "success": false, "failure_reason": "BANK_DOWN" }`
   - Success: `ORDER_CONFIRMED` + `PAYMENT_SUCCESS` + creates shipment
   - Failure: `ORDER_CANCELLED` + `PAYMENT_FAILED` + records cancellation reason
@@ -55,6 +66,84 @@ GlobalCart 360 is a **dual-purpose system**:
 - Auth: `backend/routes/api_auth.py` and `backend/security.py`
 - Models: `backend/models.py` (`CheckoutStartOut`, `PaymentSimulateIn/Out`, `CartSummaryOut`)
 - DB schema: `sql/10_shop_features.sql` (cart table), `sql/00_schema.sql` (orders/payments)
+
+## API Documentation (Orders + Payments)
+
+FastAPI publishes interactive docs via OpenAPI/Swagger:
+- Local: `http://localhost:8000/docs`
+
+### Auth (JWT)
+
+1) Get a JWT token:
+```bash
+curl -X POST http://localhost:8000/api/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"YourPassword"}'
+```
+
+2) Use it in subsequent calls:
+```bash
+Authorization: Bearer <access_token>
+```
+
+### Create an order (initiate payment)
+
+Endpoint:
+- `POST /api/customer/checkout/start`
+
+Creates:
+- `fact_orders.order_status = ORDER_CREATED`
+- `fact_payments.payment_status = PAYMENT_PENDING`
+
+Example:
+```bash
+curl -X POST http://localhost:8000/api/customer/checkout/start \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "items": [{"product_id": 1001, "qty": 2}],
+    "channel": "WEB",
+    "currency": "INR",
+    "payment_method": "UPI"
+  }'
+```
+
+### Complete payment (success / failed)
+
+Endpoint:
+- `POST /api/customer/orders/{order_id}/simulate-payment`
+
+Success transition:
+- `PAYMENT_PENDING → PAYMENT_SUCCESS`
+- `ORDER_CREATED → ORDER_CONFIRMED`
+
+Failure transition:
+- `PAYMENT_PENDING → PAYMENT_FAILED`
+- `ORDER_CREATED → ORDER_CANCELLED`
+
+Examples:
+
+Success:
+```bash
+curl -X POST http://localhost:8000/api/customer/orders/12345/simulate-payment \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"success": true}'
+```
+
+Failure:
+```bash
+curl -X POST http://localhost:8000/api/customer/orders/12345/simulate-payment \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"success": false, "failure_reason": "BANK_DOWN"}'
+```
+
+### Webhooks
+This project currently uses a **simulated payment callback** endpoint rather than a third-party provider webhook.
+If you integrate Stripe/Razorpay, this is where you would add:
+- `POST /api/payments/webhook` (provider-signed)
+- idempotency keys + event replay handling
 
 ## Step-by-step (Local + Public URL)
 

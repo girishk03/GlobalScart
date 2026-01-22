@@ -12,6 +12,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 import psycopg
 
 from ..db import get_conn
+from ..security import decode_access_token, parse_bearer_token
 from ..models import (
     CartItemIn,
     CartSummaryOut,
@@ -45,6 +46,28 @@ router = APIRouter(prefix="/api/customer", tags=["api_customer"])
 def _reject_admin(admin_key: str | None) -> None:
     if admin_key is not None:
         raise HTTPException(status_code=403, detail="Admin access is not allowed on customer APIs")
+
+
+def _customer_id_from_auth_or_query(
+    *,
+    authorization: str | None,
+    customer_id: int | None,
+    require: bool,
+) -> int:
+    token_str = parse_bearer_token(authorization)
+    if token_str:
+        payload = decode_access_token(token_str)
+        cid = payload.get("customer_id")
+        if cid is None:
+            raise HTTPException(status_code=401, detail="Invalid token (missing customer_id)")
+        return int(cid)
+
+    if customer_id is not None:
+        return int(customer_id)
+
+    if require:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    raise HTTPException(status_code=400, detail="customer_id is required")
 
 
 def _utc_now() -> datetime:
@@ -371,10 +394,12 @@ def _send_outbox_email_safe(conn, customer_id: int, kind: str, subject: str, bod
 
 @router.get("/cart", response_model=CartSummaryOut)
 def cart_get(
-    customer_id: int = Query(..., ge=1),
+    customer_id: int | None = Query(None, ge=1),
     admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     _reject_admin(admin_key)
+    customer_id = _customer_id_from_auth_or_query(authorization=authorization, customer_id=customer_id, require=True)
     try:
         with get_conn() as conn:
             conn.execute("SET TIME ZONE 'UTC';", prepare=False)
@@ -393,10 +418,12 @@ def cart_get(
 @router.post("/cart")
 def cart_add(
     payload: CartItemIn,
-    customer_id: int = Query(..., ge=1),
+    customer_id: int | None = Query(None, ge=1),
     admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     _reject_admin(admin_key)
+    customer_id = _customer_id_from_auth_or_query(authorization=authorization, customer_id=customer_id, require=True)
     now_ts = _utc_now()
     try:
         with get_conn() as conn:
@@ -428,10 +455,12 @@ def cart_add(
 @router.put("/cart")
 def cart_update(
     payload: CartItemIn,
-    customer_id: int = Query(..., ge=1),
+    customer_id: int | None = Query(None, ge=1),
     admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     _reject_admin(admin_key)
+    customer_id = _customer_id_from_auth_or_query(authorization=authorization, customer_id=customer_id, require=True)
     now_ts = _utc_now()
     try:
         with get_conn() as conn:
@@ -463,10 +492,12 @@ def cart_update(
 @router.delete("/cart/{product_id}")
 def cart_remove(
     product_id: int,
-    customer_id: int = Query(..., ge=1),
+    customer_id: int | None = Query(None, ge=1),
     admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     _reject_admin(admin_key)
+    customer_id = _customer_id_from_auth_or_query(authorization=authorization, customer_id=customer_id, require=True)
     try:
         with get_conn() as conn:
             conn.execute("SET TIME ZONE 'UTC';", prepare=False)
@@ -490,10 +521,12 @@ def cart_remove(
 
 @router.delete("/cart")
 def cart_clear(
-    customer_id: int = Query(..., ge=1),
+    customer_id: int | None = Query(None, ge=1),
     admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     _reject_admin(admin_key)
+    customer_id = _customer_id_from_auth_or_query(authorization=authorization, customer_id=customer_id, require=True)
     try:
         with get_conn() as conn:
             conn.execute("SET TIME ZONE 'UTC';", prepare=False)
@@ -1046,10 +1079,12 @@ def list_customer_emails(
 @router.get("/orders/{order_id}", response_model=OrderDetailOut)
 def order_detail(
     order_id: int,
-    customer_id: int = Query(..., ge=1),
+    customer_id: int | None = Query(None, ge=1),
     admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     _reject_admin(admin_key)
+    customer_id = _customer_id_from_auth_or_query(authorization=authorization, customer_id=customer_id, require=True)
     try:
         with get_conn() as conn:
             conn.execute("SET TIME ZONE 'UTC';", prepare=False)
@@ -1924,13 +1959,20 @@ def create_order(req: CreateOrderRequest, admin_key: str | None = Header(None, a
 
 
 @router.post("/checkout/start", response_model=CheckoutStartOut)
-def checkout_start(req: CreateOrderRequest, admin_key: str | None = Header(None, alias="X-Admin-Key")) -> CheckoutStartOut:
+def checkout_start(
+    req: CreateOrderRequest,
+    admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> CheckoutStartOut:
     _reject_admin(admin_key)
 
     if not req.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
-    if req.customer_id is None:
-        raise HTTPException(status_code=401, detail="Sign in required to place an order")
+    customer_id = _customer_id_from_auth_or_query(
+        authorization=authorization,
+        customer_id=int(req.customer_id) if req.customer_id is not None else None,
+        require=True,
+    )
 
     now_ts = _utc_now()
     payment_method = str(getattr(req, "payment_method", "UPI") or "UPI")
@@ -1942,12 +1984,11 @@ def checkout_start(req: CreateOrderRequest, admin_key: str | None = Header(None,
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT geo_id FROM globalcart.vw_customer_customers WHERE customer_id = %s",
-                        (int(req.customer_id),),
+                        (int(customer_id),),
                     )
                     row = cur.fetchone()
                 if row is None:
                     raise HTTPException(status_code=400, detail="Invalid customer_id")
-                customer_id = int(req.customer_id)
                 geo_id = int(row[0])
                 fc_id = _pick_any(conn, "globalcart.vw_customer_fc", "fc_id")
 
@@ -2105,10 +2146,12 @@ def checkout_start(req: CreateOrderRequest, admin_key: str | None = Header(None,
 def simulate_payment(
     order_id: int,
     payload: PaymentSimulateIn,
-    customer_id: int = Query(..., ge=1),
+    customer_id: int | None = Query(None, ge=1),
     admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ) -> PaymentSimulateOut:
     _reject_admin(admin_key)
+    customer_id = _customer_id_from_auth_or_query(authorization=authorization, customer_id=customer_id, require=True)
     now_ts = _utc_now()
 
     try:
@@ -2273,8 +2316,18 @@ def orders_by_customer(
     customer_id: int,
     limit: int = Query(20, ge=1, le=100),
     admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     _reject_admin(admin_key)
+
+    # If JWT is provided, ignore the path param and enforce token customer_id.
+    token_str = parse_bearer_token(authorization)
+    if token_str:
+        payload = decode_access_token(token_str)
+        cid = payload.get("customer_id")
+        if cid is None:
+            raise HTTPException(status_code=401, detail="Invalid token (missing customer_id)")
+        customer_id = int(cid)
 
     try:
         with get_conn() as conn:
