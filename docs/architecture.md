@@ -1,5 +1,22 @@
 # Architecture (GlobalCart 360)
 
+## System diagram (demo)
+
+```mermaid
+flowchart LR
+  UI[Shop UI /shop\nHTML+JS] -->|JWT Bearer| API[FastAPI backend\nbackend/main.py]
+
+  API --> AUTH[/api/auth/*\nOTP + JWT/]
+  API --> CUST[/api/customer/*\nproducts, cart, checkout, orders/]
+  API --> PAY[/api/payments/*\nRazorpay sandbox/]
+  PAY -->|Webhook| API
+
+  API --> DB[(PostgreSQL\nSchema: globalcart)]
+  DB --> VIEWS[SQL Views\n(sql/02_views.sql)]
+  VIEWS --> BI[PowerBI/Tableau\n(dashboards/)]
+  DB --> PY[Python analytics\n(src/, notebooks/)]
+```
+
 ## Target Operating Model (Real Company)
 
 ### Data Sources (Operational)

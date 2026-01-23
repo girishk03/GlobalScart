@@ -71,6 +71,19 @@ curl -X POST http://localhost:8000/api/customer/cart \
     - `fact_orders.order_status = ORDER_CREATED`
     - `fact_payments.payment_status = PAYMENT_PENDING`
 
+### Inventory / Stock handling (current limitation)
+
+This demo does **not** implement real inventory reservation or stock decrement.
+
+Current behavior:
+- Products are treated as always available (no oversell prevention).
+- Checkout and payment flows do not mutate stock levels.
+
+If you want to extend this into a production-like flow, the minimum acceptable pattern is:
+- Stock check + reservation during `POST /api/customer/checkout/start`
+- Final decrement on payment success (`/api/customer/orders/{order_id}/simulate-payment` success path or Razorpay confirm/webhook)
+- Release reservation on payment failure/cancel
+
 ### Orders
 
 - `GET /api/customer/orders/{order_id}`
@@ -84,16 +97,20 @@ curl -X POST http://localhost:8000/api/customer/cart \
 
 ### Razorpay (sandbox)
 
+Implementation:
+- Routes: `backend/routes/api_payments.py`
+- DB migration: `sql/11_razorpay.sql`
+
 - `POST /api/payments/razorpay/order?order_id=...`
   - Creates a Razorpay Order for an existing GlobalCart `order_id`.
 
 - `POST /api/payments/razorpay/confirm`
-  - Verifies Razorpay Checkout signature and transitions:
+  - Verifies Razorpay Checkout signature (`HMAC_SHA256(razorpay_order_id|razorpay_payment_id, key_secret)`) and transitions:
     - `PAYMENT_PENDING → PAYMENT_SUCCESS`
     - `ORDER_CREATED → ORDER_CONFIRMED`
 
 - `POST /api/payments/razorpay/webhook`
-  - Provider-signed webhook ingestion with idempotency.
+  - Provider-signed webhook ingestion with idempotency (events stored in `globalcart.payment_webhook_events`).
 
 Required env vars:
 - `RAZORPAY_KEY_ID`
