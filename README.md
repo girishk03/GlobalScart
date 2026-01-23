@@ -81,6 +81,35 @@ Planned / out of scope for this demo:
 - Refresh tokens + session rotation
 - Production payment provider hardening (fraud, PCI scope, etc.)
 
+## Known Limitations (Prototype / Demo scope)
+
+- **Inventory locking**
+  - Implemented as a **single-database reservation model** (row locks + `reserved_qty`) to prevent basic oversell.
+  - Not implemented: multi-warehouse allocation, reservation expiry, backorders, stock reconciliation jobs.
+
+- **Payment webhook idempotency**
+  - Implemented for Razorpay webhooks via an idempotency table (`globalcart.payment_webhook_events`) keyed by `(provider, event_id)`.
+  - Not implemented: provider-side idempotency keys for all payment creation calls, event replay tooling, and a full reconciliation job.
+
+- **Payment failure recovery / reconciliation**
+  - The demo models `PENDING/SUCCESS/FAILED` states and logs webhook events.
+  - Not implemented: automated reconciliation for "money captured but DB update failed" scenarios (would be a periodic job in production).
+
+- **Role management / audit trail**
+  - Admin role assignment is treated as **manual** for this prototype.
+  - Not implemented: role change audit fields (`role_updated_at`, `role_updated_by`) and an admin audit log workflow.
+
+- **Rate limiting**
+  - A basic in-memory rate limiter exists in `backend/main.py` for `/api/*`.
+  - Not implemented: distributed rate limiting (Redis) and WAF/bot protection as would be expected in production.
+
+- **Tests scope**
+  - Tests validate lifecycle correctness, rollback, inventory reservation/consume/release, and endpoint behavior.
+  - Not implemented: adversarial/concurrency testing (highly concurrent checkouts), fuzzing, and full security test coverage.
+
+- **API contracts**
+  - Most endpoints use Pydantic models; some legacy paths and query-parameter fallbacks remain for backwards compatibility.
+
 ### Auth & Access
 - OTP-based signup/login (`/api/auth/request-otp`, `/api/auth/verify-otp`)
 - JWT tokens (`/api/auth/token`) with role-based access (`customer`/`admin`)
