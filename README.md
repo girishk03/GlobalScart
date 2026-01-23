@@ -12,6 +12,9 @@ GlobalCart 360 is a **dual-purpose system**:
 - **Admin vs customer flows**: role-based access + protected admin endpoints
 - **Evidence**:
   - API docs: `http://localhost:8000/docs`
+  - API reference (repo): `docs/api.md`
+  - UI flow (repo): `docs/ui.md`
+  - Security notes (repo): `docs/security.md`
   - Transaction lifecycle code: `backend/routes/api_customer.py`
   - Lifecycle tests: `tests/test_checkout_lifecycle.py`
   - Storefront UI calling the lifecycle: `frontend/shop/checkout.html` + `frontend/shop/shop.js`
@@ -59,6 +62,23 @@ For the “mixed concerns” story (analytics + APIs + UI + BI assets), see: `do
   - Failure: `ORDER_CANCELLED` + `PAYMENT_FAILED` + records cancellation reason
 - **State machine**: `ORDER_CREATED → PAYMENT_PENDING → {PAYMENT_SUCCESS → ORDER_CONFIRMED} | {PAYMENT_FAILED → ORDER_CANCELLED}`
 - **Rollback**: All operations use DB transactions; any error rolls back without partial writes
+
+### Implemented vs planned
+
+Implemented in this repo:
+- Product catalog browsing + search/filter
+- Persistent cart
+- Checkout start (atomic order + payment pending)
+- Payment flows:
+  - Simulated payment callback for deterministic demos
+  - Razorpay sandbox order/confirm/webhook
+- Admin APIs (JWT or admin key) + analytics endpoints
+
+Planned / out of scope for this demo:
+- Inventory reservation/stock deduction
+- Refunds workflow + reconciliation
+- Refresh tokens + session rotation
+- Production payment provider hardening (fraud, PCI scope, etc.)
 
 ### Auth & Access
 - OTP-based signup/login (`/api/auth/request-otp`, `/api/auth/verify-otp`)
@@ -213,22 +233,19 @@ python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 - Default Admin Password: `admin`
 
 ### 9) Make it public (Cloudflare Quick Tunnel)
-In a new terminal (keep backend still running):
+Optional (demo convenience): in a new terminal (keep backend still running):
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:8000
 ```
 
 ### 10) Open the public URLs
-Current public URL:
-- https://accessed-taken-grande-houston.trycloudflare.com
+Use the `trycloudflare.com` URL printed by `cloudflared`, then open:
+- Shop: `<public-url>/shop/`
+- Admin: `<public-url>/admin/`
+- API docs: `<public-url>/docs`
 
-Then open:
-- Shop: https://accessed-taken-grande-houston.trycloudflare.com/shop/
-- Admin: https://accessed-taken-grande-houston.trycloudflare.com/admin/
-- API docs: https://accessed-taken-grande-houston.trycloudflare.com/docs
-
-Note: this `trycloudflare.com` URL **changes whenever you restart** `cloudflared`.
+Note: Quick Tunnel URLs are **ephemeral** and change on restart.
 
 ### 11) Want the same URL always?
 Use a custom domain + Cloudflare **named tunnel** (stable URL).
