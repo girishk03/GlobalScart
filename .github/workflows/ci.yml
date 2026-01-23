@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: globalcart
+          POSTGRES_PASSWORD: globalcart
+          POSTGRES_DB: globalcart
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U globalcart -d globalcart"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGDATABASE: globalcart
+      PGUSER: globalcart
+      PGPASSWORD: globalcart
+      ENV: dev
+      # For CI only. In prod you must set a strong secret.
+      JWT_SECRET: ci-jwt-secret
+      JWT_ISSUER: globalcart
+      JWT_AUDIENCE: globalcart
+      DEMO_SHOW_OTP: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Initialize DB schema + views
+        run: |
+          python -m src.generate_data --scale small --seed 42
+          python -m src.load_to_postgres --truncate
+          python -m src.run_sql --sql sql/02_views.sql
+          python -m src.run_sql --sql sql/07_app_auth.sql
+          python -m src.run_sql --sql sql/10_shop_features.sql
+          python -m src.run_sql --sql sql/11_razorpay.sql
+
+      - name: Run tests
+        run: |
+          pytest -q

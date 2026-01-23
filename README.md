@@ -35,6 +35,7 @@ For the “mixed concerns” story (analytics + APIs + UI + BI assets), see: `do
   - `backend/routes/api_customer.py`: cart, checkout, order/payment lifecycle
   - `backend/routes/api_auth.py`: OTP + JWT auth, `/me` endpoint
   - `backend/routes/api_admin.py`: admin APIs (JWT or admin-key auth)
+  - `backend/routes/api_payments.py`: Razorpay sandbox (order + confirm + webhook)
 - `frontend/`: customer storefront (/shop) and admin UI assets
 - `notebooks/`: EDA, RFM segmentation, forecasting (notebook-friendly)
 - `docs/`: data dictionary, KPI definitions, architecture
@@ -231,6 +232,12 @@ Note: this `trycloudflare.com` URL **changes whenever you restart** `cloudflared
 
 ### 11) Want the same URL always?
 Use a custom domain + Cloudflare **named tunnel** (stable URL).
+
+## CI/CD and Deployment
+
+- CI: GitHub Actions workflow at `.github/workflows/ci.yml` runs `pytest` and boots a Postgres service.
+- Container: `Dockerfile` can be used for Railway/Render/Fly.io.
+- Deployment guide: `docs/deployment.md`
 
 ### Troubleshooting
 - If UI pages are not loading, confirm the backend is running on `http://127.0.0.1:8000`.
