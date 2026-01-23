@@ -33,6 +33,10 @@ This project is a demo but implements several production-style security patterns
   - Secret: `RAZORPAY_WEBHOOK_SECRET`
   - Idempotency: stored in `globalcart.payment_webhook_events`.
 
+## Inventory consistency (oversell prevention)
+
+- Inventory rows are locked during reservation (`SELECT ... FOR UPDATE`) so concurrent checkouts cannot oversell the same stock.
+
 ## Production hardening (recommended)
 
 - Use HTTPS only.

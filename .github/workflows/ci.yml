@@ -58,6 +58,7 @@ jobs:
           python -m src.run_sql --sql sql/07_app_auth.sql
           python -m src.run_sql --sql sql/10_shop_features.sql
           python -m src.run_sql --sql sql/11_razorpay.sql
+          python -m src.run_sql --sql sql/12_inventory.sql
 
       - name: Run tests
         run: |

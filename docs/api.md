@@ -71,18 +71,29 @@ curl -X POST http://localhost:8000/api/customer/cart \
     - `fact_orders.order_status = ORDER_CREATED`
     - `fact_payments.payment_status = PAYMENT_PENDING`
 
-### Inventory / Stock handling (current limitation)
+### Inventory / Stock handling (implemented)
 
-This demo does **not** implement real inventory reservation or stock decrement.
+This demo implements **basic inventory enforcement** to prevent oversell:
 
-Current behavior:
-- Products are treated as always available (no oversell prevention).
-- Checkout and payment flows do not mutate stock levels.
+- **Reservation at checkout** (`POST /api/customer/checkout/start`)
+  - Locks the relevant inventory rows (`SELECT ... FOR UPDATE`)
+  - Checks available quantity (`on_hand_qty - reserved_qty`)
+  - Increments `reserved_qty` and writes `order_inventory_reservations`
 
-If you want to extend this into a production-like flow, the minimum acceptable pattern is:
-- Stock check + reservation during `POST /api/customer/checkout/start`
-- Final decrement on payment success (`/api/customer/orders/{order_id}/simulate-payment` success path or Razorpay confirm/webhook)
-- Release reservation on payment failure/cancel
+- **Consume on payment success**
+  - Simulated payment success (`/api/customer/orders/{order_id}/simulate-payment`)
+  - Razorpay confirm/webhook success (`/api/payments/razorpay/confirm`, `/api/payments/razorpay/webhook`)
+  - Decrements `on_hand_qty` and `reserved_qty`
+
+- **Release on payment failure/cancel**
+  - Releases `reserved_qty` and marks reservation status.
+
+Schema:
+- `globalcart.product_inventory`
+- `globalcart.order_inventory_reservations`
+
+Migration:
+- `sql/12_inventory.sql`
 
 ### Orders
 

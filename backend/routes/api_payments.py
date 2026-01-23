@@ -12,6 +12,7 @@ import psycopg
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from ..db import get_conn
+from ..inventory import consume_inventory, release_inventory
 from ..models import RazorpayConfirmIn, RazorpayConfirmOut, RazorpayCreateOrderOut
 from ..security import decode_access_token, parse_bearer_token
 
@@ -235,6 +236,8 @@ def razorpay_confirm_payment(
                 if existing_order_status not in {"ORDER_CREATED"}:
                     raise HTTPException(status_code=400, detail=f"Order not in payable state: {existing_order_status}")
 
+                consume_inventory(conn, order_id=int(order_id))
+
                 cur.execute(
                     """
                     UPDATE globalcart.fact_payments
@@ -372,7 +375,12 @@ async def razorpay_webhook(request: Request, x_razorpay_signature: str | None = 
                     (order_id, payment_id, event_id),
                 )
 
-                if payment_id is not None:
+                if payment_id is not None and order_id is not None:
+                    if new_payment_status == "PAYMENT_SUCCESS":
+                        consume_inventory(conn, order_id=int(order_id))
+                    elif new_payment_status == "PAYMENT_FAILED":
+                        release_inventory(conn, order_id=int(order_id))
+
                     cur.execute(
                         """
                         UPDATE globalcart.fact_payments

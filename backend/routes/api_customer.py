@@ -12,6 +12,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 import psycopg
 
 from ..db import get_conn
+from ..inventory import consume_inventory, release_inventory, reserve_inventory
 from ..security import decode_access_token, parse_bearer_token
 from ..models import (
     CartItemIn,
@@ -2090,6 +2091,12 @@ def checkout_start(
                             row,
                         )
 
+                    reserve_inventory(
+                        conn,
+                        order_id=int(order_id),
+                        items=[(int(i.product_id), int(i.qty)) for i in req.items],
+                    )
+
                     cur.execute(
                         """
                         INSERT INTO globalcart.fact_payments (
@@ -2197,6 +2204,7 @@ def simulate_payment(
                         raise HTTPException(status_code=400, detail=f"Payment not pending: {payment_status}")
 
                     if payload.success:
+                        consume_inventory(conn, order_id=int(order_id))
                         cur.execute(
                             """
                             UPDATE globalcart.fact_payments
@@ -2258,6 +2266,7 @@ def simulate_payment(
                         )
 
                     reason = (payload.failure_reason or "PAYMENT_FAILED").strip() or "PAYMENT_FAILED"
+                    release_inventory(conn, order_id=int(order_id))
                     cur.execute(
                         """
                         UPDATE globalcart.fact_payments
@@ -2533,6 +2542,8 @@ def cancel_order(
                     """,
                     (int(order_id),),
                 )
+
+                release_inventory(conn, order_id=int(order_id))
 
                 cur.execute(
                     """

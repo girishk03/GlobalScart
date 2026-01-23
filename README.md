@@ -69,13 +69,14 @@ Implemented in this repo:
 - Product catalog browsing + search/filter
 - Persistent cart
 - Checkout start (atomic order + payment pending)
+- Inventory enforcement (stock reservation at checkout to prevent oversell)
 - Payment flows:
   - Simulated payment callback for deterministic demos
   - Razorpay sandbox order/confirm/webhook
 - Admin APIs (JWT or admin key) + analytics endpoints
 
 Planned / out of scope for this demo:
-- Inventory reservation/stock deduction
+- Advanced inventory (multi-warehouse, reservations expiry, backorders)
 - Refunds workflow + reconciliation
 - Refresh tokens + session rotation
 - Production payment provider hardening (fraud, PCI scope, etc.)
@@ -215,6 +216,7 @@ python -m src.run_sql --sql sql/02_views.sql
 python3 -m src.run_sql --sql sql/07_app_auth.sql
 python3 -m src.run_sql --sql sql/10_shop_features.sql
 python3 -m src.run_sql --sql sql/11_razorpay.sql
+python3 -m src.run_sql --sql sql/12_inventory.sql
 ```
 
 ### 6) Start the FastAPI backend (serves Shop + Admin)

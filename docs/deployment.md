@@ -19,6 +19,7 @@ Then run the SQL setup once against the provisioned database:
 - `sql/07_app_auth.sql`
 - `sql/10_shop_features.sql`
 - `sql/11_razorpay.sql`
+- `sql/12_inventory.sql`
 
 ### Option B: Railway
 
