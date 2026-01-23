@@ -21,6 +21,8 @@ const GC = {
     createOrder: '/api/customer/orders',
     checkoutStart: '/api/customer/checkout/start',
     simulatePayment: (orderId) => `/api/customer/orders/${encodeURIComponent(orderId)}/simulate-payment`,
+    razorpayCreateOrder: (orderId) => `/api/payments/razorpay/order?order_id=${encodeURIComponent(orderId)}`,
+    razorpayConfirm: '/api/payments/razorpay/confirm',
     cancelOrder: (id) => `/api/customer/orders/${encodeURIComponent(id)}/cancel`,
     promoValidate: '/api/customer/promos/validate',
     ordersByCustomer: (id) => `/api/customer/orders/by-customer/${encodeURIComponent(id)}`,
@@ -2804,21 +2806,79 @@ async function initCheckout() {
           const orderId = start && start.order_id ? Number(start.order_id) : null;
           if (!orderId) throw new Error('Checkout failed: missing order_id');
 
-          const payRes = await apiFetch(
-            `${GC.api.simulatePayment(orderId)}?customer_id=${encodeURIComponent(cust.customer_id)}`,
-            {
-              method: 'POST',
-              body: JSON.stringify({ success: !simulate, failure_reason: simulate ? (fr || 'BANK_DECLINED') : null }),
-            }
-          );
+          const pm = pmSel ? String(pmSel.value || 'UPI') : 'UPI';
 
-          if (payRes && String(payRes.payment_status || '').toUpperCase() === 'PAYMENT_FAILED') {
-            toast('Payment failed', `Order #${orderId} cancelled due to payment failure.`, 'danger');
-            await track('PAYMENT_FAILED', {
-              order_id: Number(orderId),
-              failure_reason: simulate ? (fr || 'BANK_DECLINED') : null,
+          if (pm === 'RAZORPAY') {
+            if (!window.Razorpay) throw new Error('Razorpay script not loaded');
+
+            const rp = await apiFetch(GC.api.razorpayCreateOrder(orderId), { method: 'POST' });
+            const rpOrderId = rp && rp.razorpay_order_id ? String(rp.razorpay_order_id) : '';
+            const rpKeyId = rp && rp.razorpay_key_id ? String(rp.razorpay_key_id) : '';
+            const amountPaise = rp && rp.amount_paise ? Number(rp.amount_paise) : 0;
+            if (!rpOrderId || !rpKeyId || !amountPaise) throw new Error('Razorpay order create failed');
+
+            await new Promise((resolve, reject) => {
+              const rz = new window.Razorpay({
+                key: rpKeyId,
+                amount: amountPaise,
+                currency: 'INR',
+                name: 'GlobalSCART Shop',
+                description: `Order #${orderId}`,
+                order_id: rpOrderId,
+                handler: async (resp) => {
+                  try {
+                    const conf = await apiFetch(GC.api.razorpayConfirm, {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        order_id: orderId,
+                        razorpay_order_id: String(resp.razorpay_order_id || ''),
+                        razorpay_payment_id: String(resp.razorpay_payment_id || ''),
+                        razorpay_signature: String(resp.razorpay_signature || ''),
+                      }),
+                    });
+                    if (conf && String(conf.payment_status || '').toUpperCase() === 'PAYMENT_SUCCESS') {
+                      resolve(true);
+                      return;
+                    }
+                    reject(new Error('Payment confirmation failed'));
+                  } catch (e) {
+                    reject(e);
+                  }
+                },
+                prefill: {
+                  name: cust && cust.display_name ? String(cust.display_name) : '',
+                  email: cust && cust.email ? String(cust.email) : '',
+                  contact: recipientPhone ? String(recipientPhone.value || '') : '',
+                },
+                notes: {
+                  globalcart_order_id: String(orderId),
+                },
+                theme: { color: '#0b1220' },
+              });
+
+              rz.on('payment.failed', (resp) => {
+                reject(new Error('Payment failed'));
+              });
+
+              rz.open();
             });
-            return;
+          } else {
+            const payRes = await apiFetch(
+              `${GC.api.simulatePayment(orderId)}?customer_id=${encodeURIComponent(cust.customer_id)}`,
+              {
+                method: 'POST',
+                body: JSON.stringify({ success: !simulate, failure_reason: simulate ? (fr || 'BANK_DECLINED') : null }),
+              }
+            );
+
+            if (payRes && String(payRes.payment_status || '').toUpperCase() === 'PAYMENT_FAILED') {
+              toast('Payment failed', `Order #${orderId} cancelled due to payment failure.`, 'danger');
+              await track('PAYMENT_FAILED', {
+                order_id: Number(orderId),
+                failure_reason: simulate ? (fr || 'BANK_DECLINED') : null,
+              });
+              return;
+            }
           }
 
           const overlay = qs('#orderConfirmOverlay');

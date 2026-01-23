@@ -21,6 +21,7 @@ from .routes.api_admin import router as api_admin_router
 from .routes.api_auth import router as api_auth_router
 from .routes.api_customer import router as api_customer_router
 from .routes.api_events import router as api_events_router
+from .routes.api_payments import router as api_payments_router
 from .analytics.admin_analytics import router as admin_analytics_router
 
 
@@ -221,6 +222,7 @@ app.add_middleware(
 app.include_router(addresses_router)
 app.include_router(api_customer_router)
 app.include_router(api_events_router)
+app.include_router(api_payments_router)
 app.include_router(api_admin_router)
 app.include_router(admin_analytics_router)
 app.include_router(api_auth_router)

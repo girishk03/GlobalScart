@@ -138,6 +138,29 @@ class PaymentSimulateOut(BaseModel):
     payment_status: str
 
 
+class RazorpayCreateOrderOut(BaseModel):
+    order_id: int
+    payment_id: int
+    razorpay_key_id: str
+    razorpay_order_id: str
+    amount_paise: int
+    currency: str = "INR"
+
+
+class RazorpayConfirmIn(BaseModel):
+    order_id: int
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+class RazorpayConfirmOut(BaseModel):
+    order_id: int
+    payment_id: int
+    order_status: str
+    payment_status: str
+
+
 class FunnelEventIn(BaseModel):
     session_id: str = Field(min_length=6, max_length=64)
     stage: str

@@ -144,10 +144,14 @@ curl -X POST http://localhost:8000/api/customer/orders/12345/simulate-payment \
 ```
 
 ### Webhooks
-This project currently uses a **simulated payment callback** endpoint rather than a third-party provider webhook.
-If you integrate Stripe/Razorpay, this is where you would add:
-- `POST /api/payments/webhook` (provider-signed)
-- idempotency keys + event replay handling
+This project includes both:
+- a **simulated payment** endpoint for deterministic demos (`/api/customer/orders/{order_id}/simulate-payment`)
+- a **Razorpay sandbox** integration with provider-signed webhooks.
+
+Razorpay endpoints:
+- `POST /api/payments/razorpay/order?order_id=...` (creates Razorpay Order for an existing GlobalCart `order_id`)
+- `POST /api/payments/razorpay/confirm` (verifies checkout signature and confirms the order)
+- `POST /api/payments/razorpay/webhook` (provider-signed event ingestion + idempotency)
 
 ## Step-by-step (Local + Public URL)
 
@@ -189,6 +193,7 @@ python -m src.run_sql --sql sql/02_views.sql
 ```bash
 python3 -m src.run_sql --sql sql/07_app_auth.sql
 python3 -m src.run_sql --sql sql/10_shop_features.sql
+python3 -m src.run_sql --sql sql/11_razorpay.sql
 ```
 
 ### 6) Start the FastAPI backend (serves Shop + Admin)
