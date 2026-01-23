@@ -49,9 +49,38 @@ def _pick_any_product(client: TestClient) -> int:
     return int(products[0]["product_id"])
 
 
+def _dsn() -> str:
+    host = os.getenv("PGHOST", "localhost")
+    port = int(os.getenv("PGPORT", "5432"))
+    database = os.getenv("PGDATABASE", "globalcart")
+    user = os.getenv("PGUSER", "globalcart")
+    password = os.getenv("PGPASSWORD", "globalcart")
+    return f"host={host} port={port} dbname={database} user={user} password={password}"
+
+
+def _ensure_stock(product_id: int, on_hand: int) -> None:
+    with psycopg.connect(_dsn()) as conn:
+        conn.execute("SET TIME ZONE 'UTC';", prepare=False)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO globalcart.product_inventory (product_id, on_hand_qty, reserved_qty)
+                VALUES (%s, %s, 0)
+                ON CONFLICT (product_id) DO UPDATE
+                SET on_hand_qty = GREATEST(globalcart.product_inventory.on_hand_qty, EXCLUDED.on_hand_qty),
+                    reserved_qty = 0,
+                    updated_at = NOW();
+                """,
+                (int(product_id), int(on_hand)),
+            )
+        conn.commit()
+
+
 def test_checkout_success_flow(client: TestClient):
     customer_id = _ensure_test_customer_exists(client)
     product_id = _pick_any_product(client)
+
+    _ensure_stock(product_id, on_hand=20)
 
     # Add to cart
     r = client.post(
@@ -98,6 +127,8 @@ def test_checkout_failure_flow(client: TestClient):
     customer_id = _ensure_test_customer_exists(client)
     product_id = _pick_any_product(client)
 
+    _ensure_stock(product_id, on_hand=20)
+
     # Start checkout
     r = client.post(
         "/api/customer/checkout/start",
@@ -142,6 +173,8 @@ def test_checkout_rollback_on_invalid_product(client: TestClient):
 def test_cart_persistence_and_totals(client: TestClient):
     customer_id = _ensure_test_customer_exists(client)
     product_id = _pick_any_product(client)
+
+    _ensure_stock(product_id, on_hand=50)
 
     # Clear cart first
     client.delete(f"/api/customer/cart?customer_id={customer_id}")

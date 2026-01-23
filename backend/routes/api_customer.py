@@ -1374,6 +1374,11 @@ def resolve_customer(req: CustomerResolveIn, admin_key: str | None = Header(None
         )
 
 
+@router.post("/resolve", response_model=CustomerResolveOut)
+def resolve_customer_compat(req: CustomerResolveIn, admin_key: str | None = Header(None, alias="X-Admin-Key")):
+    return resolve_customer(req=req, admin_key=admin_key)
+
+
 @router.get("/products", response_model=List[ProductOut])
 def list_products(
     limit: int = Query(24, ge=1, le=200),
