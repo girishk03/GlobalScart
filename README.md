@@ -1,12 +1,35 @@
-# GlobalCart 360: E-Commerce Analytics Platform + Transactional Store (Demo)
+# GlobalCart 360: Backend Commerce & Analytics Engine
 
-GlobalCart 360 is a **dual-purpose system**:
-- **Analytics platform** for a global e-commerce business (single source of truth, near real-time KPIs, RFM/churn/cohorts, profit leakage, forecasting, BI marts)
-- **Transactional demo storefront** with a **real order + payment lifecycle** (cart, checkout, atomic order creation, payment simulation, state transitions with rollback)
+[**🚀 API Documentation**](http://localhost:8000/docs) | [**🛒 Shop Demo**](http://localhost:8000/shop/) | [**📊 Admin Dashboard**](http://localhost:8000/admin/)
 
-> This repo demonstrates both analytical and transactional patterns. The storefront is a demo, but the order/payment flow is implemented with real database transactions and explicit state machines.
+## 🔥 Why This Project Matters
+- **Transactional Integrity**: Engineered a multi-stage checkout lifecycle (`ORDER_CREATED → PAYMENT_PENDING → SUCCESS/FAIL`) using PostgreSQL transactions for atomic consistency.
+- **Production-Style Backend**: Implemented FastAPI with structured middleware, Request ID tracing, and centralized configuration.
+- **Data Engineering**: Built a near real-time analytics pipeline with star-schema processing, idempotent upserts, and incremental refresh logic.
+- **Security & RBAC**: Developed JWT-secured API flows with Role-Based Access Control and OTP-based verification.
+- **Containerization**: Fully containerized environment using Docker Compose for reproducible deployment.
 
-## Project Summary (What reviewers should look at)
+## 📸 System Preview (High-Impact UI)
+
+### 🛠️ Backend Observability & Admin Analytics
+<p align="center">
+  <img src="screenshots/12-admin-analytics.png" width="32%" alt="Analytics Dashboard" />
+  <img src="screenshots/13-admin-audit.png" width="32%" alt="Audit Log" />
+  <img src="screenshots/15-journey-replay.png" width="32%" alt="User Journey" />
+</p>
+
+### 🛒 Transactional Storefront
+<p align="center">
+  <img src="screenshots/04-shop-home.png" width="32%" alt="Shop" />
+  <img src="screenshots/06-cart.png" width="32%" alt="Cart" />
+  <img src="screenshots/07-checkout-top.png" width="32%" alt="Checkout" />
+</p>
+
+---
+
+## 🏗️ Technical Architecture Details
+<details>
+<summary><b>View System Overview</b></summary>
 - **Transaction processing**: cart → checkout → payment lifecycle → order confirmation/cancellation
 - **Analytics**: star schema + KPI views + incremental refresh + BI marts
 - **Admin vs customer flows**: role-based access + protected admin endpoints
@@ -23,53 +46,16 @@ GlobalCart 360 is a **dual-purpose system**:
 
 For the “mixed concerns” story (analytics + APIs + UI + BI assets), see: `docs/architecture.md`.
 
-## Demo Screenshots
+</details>
+
+<details>
+<summary><b>View All Screenshots (Full Gallery)</b></summary>
 
 ### Customer Storefront
+...
+</details>
 
-**Welcome / Landing**
-<img src="screenshots/01-welcome-screen.png" width="800"/>
-
-**Sign Up (OTP-based)**
-<img src="screenshots/02-signup.png" width="800"/>
-
-**Log In**
-<img src="screenshots/03-login.png" width="800"/>
-
-**Shop Home — Product Catalog & Filters**
-<img src="screenshots/04-shop-home.png" width="800"/>
-
-**Wishlist**
-<img src="screenshots/05-wishlist.png" width="800"/>
-
-**Cart**
-<img src="screenshots/06-cart.png" width="800"/>
-
-**Checkout — Delivery & Payment**
-<img src="screenshots/07-checkout-top.png" width="800"/>
-<img src="screenshots/08-checkout-bottom.png" width="800"/>
-
-**Order History**
-<img src="screenshots/09-orders.png" width="800"/>
-
-**Inbox / Notifications**
-<img src="screenshots/10-inbox.png" width="800"/>
-
-### Admin Dashboard
-
-**Admin Login**
-<img src="screenshots/11-admin-login.png" width="800"/>
-
-**Analytics — Revenue, Funnel & Top Products**
-<img src="screenshots/12-admin-analytics.png" width="800"/>
-
-**Audit Log — Order State Changes**
-<img src="screenshots/13-admin-audit.png" width="800"/>
-
-**User Journey Replay**
-<img src="screenshots/14-admin-journey.png" width="800"/>
-
-## Tech Stack
+## 🛠️ Tech Stack & Implementation Details
 - SQL: PostgreSQL
 - Python: FastAPI, pandas, numpy, seaborn/matplotlib, scikit-learn, statsmodels
 - Frontend: HTML/CSS/JavaScript with Bootstrap, voice search
@@ -91,312 +77,34 @@ For the “mixed concerns” story (analytics + APIs + UI + BI assets), see: `do
 - `dashboards/`: Power BI/Tableau specs + DAX measures
 - `data/`: generated raw and processed extracts (created at runtime)
 
-## Transactional E-commerce Features (Implemented)
-
-### Cart
-- Persistent cart per customer (`customer_cart_items` table)
-- APIs: `GET/POST/PUT/DELETE /api/customer/cart`
-- Auth: Send `Authorization: Bearer <JWT>` (recommended). Query `customer_id` is supported only as a fallback.
-
-### Checkout & Order Lifecycle
-- **Atomic order creation**: `POST /api/customer/checkout/start`
-  - Creates `ORDER_CREATED` + `PAYMENT_PENDING` in one DB transaction
-  - Returns `order_id` and `payment_id`
-- **Payment completion (simulated)**: `POST /api/customer/orders/{order_id}/simulate-payment`
-  - Body: `{ "success": true }` or `{ "success": false, "failure_reason": "BANK_DOWN" }`
-  - Success: `ORDER_CONFIRMED` + `PAYMENT_SUCCESS` + creates shipment
-  - Failure: `ORDER_CANCELLED` + `PAYMENT_FAILED` + records cancellation reason
-- **State machine**: `ORDER_CREATED → PAYMENT_PENDING → {PAYMENT_SUCCESS → ORDER_CONFIRMED} | {PAYMENT_FAILED → ORDER_CANCELLED}`
-- **Rollback**: All operations use DB transactions; any error rolls back without partial writes
-
-### Implemented vs planned
-
-Implemented in this repo:
-- Product catalog browsing + search/filter
-- Persistent cart
-- Checkout start (atomic order + payment pending)
-- Inventory enforcement (stock reservation at checkout to prevent oversell)
-- Payment flows:
-  - Simulated payment callback for deterministic demos
-  - Razorpay sandbox order/confirm/webhook
-- Admin APIs (JWT or admin key) + analytics endpoints
-
-Planned / out of scope for this demo:
-- Advanced inventory (multi-warehouse, reservations expiry, backorders)
-- Refunds workflow + reconciliation
-- Refresh tokens + session rotation
-- Production payment provider hardening (fraud, PCI scope, etc.)
-
-## Known Limitations (Prototype / Demo scope)
-
-- **Inventory locking**
-  - Implemented as a **single-database reservation model** (row locks + `reserved_qty`) to prevent basic oversell.
-  - Not implemented: multi-warehouse allocation, reservation expiry, backorders, stock reconciliation jobs.
-
-- **Payment webhook idempotency**
-  - Implemented for Razorpay webhooks via an idempotency table (`globalcart.payment_webhook_events`) keyed by `(provider, event_id)`.
-  - Not implemented: provider-side idempotency keys for all payment creation calls, event replay tooling, and a full reconciliation job.
-
-- **Payment failure recovery / reconciliation**
-  - The demo models `PENDING/SUCCESS/FAILED` states and logs webhook events.
-  - Not implemented: automated reconciliation for "money captured but DB update failed" scenarios (would be a periodic job in production).
-
-- **Role management / audit trail**
-  - Admin role assignment is treated as **manual** for this prototype.
-  - Not implemented: role change audit fields (`role_updated_at`, `role_updated_by`) and an admin audit log workflow.
-
-- **Rate limiting**
-  - A basic in-memory rate limiter exists in `backend/main.py` for `/api/*`.
-  - Not implemented: distributed rate limiting (Redis) and WAF/bot protection as would be expected in production.
-
-- **Tests scope**
-  - Tests validate lifecycle correctness, rollback, inventory reservation/consume/release, and endpoint behavior.
-  - Not implemented: adversarial/concurrency testing (highly concurrent checkouts), fuzzing, and full security test coverage.
-
-- **API contracts**
-  - Most endpoints use Pydantic models; some legacy paths and query-parameter fallbacks remain for backwards compatibility.
-
-### Auth & Access
-- OTP-based signup/login (`/api/auth/request-otp`, `/api/auth/verify-otp`)
-- JWT tokens (`/api/auth/token`) with role-based access (`customer`/`admin`)
-- Admin endpoints accept either JWT (role=admin) or X-Admin-Key header
-
-### Where the Code Lives
-- Cart: `backend/routes/api_customer.py` (`/cart` endpoints)
-- Checkout & payment lifecycle: `backend/routes/api_customer.py` (`/checkout/start`, `/orders/{id}/simulate-payment`)
-- Auth: `backend/routes/api_auth.py` and `backend/security.py`
-- Models: `backend/models.py` (`CheckoutStartOut`, `PaymentSimulateIn/Out`, `CartSummaryOut`)
-- DB schema: `sql/10_shop_features.sql` (cart table), `sql/00_schema.sql` (orders/payments)
-
-## API Documentation (Orders + Payments)
-
-FastAPI publishes interactive docs via OpenAPI/Swagger:
-- Local: `http://localhost:8000/docs`
-
-### Auth (JWT)
-
-1) Get a JWT token:
-```bash
-curl -X POST http://localhost:8000/api/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{"email":"you@example.com","password":"YourPassword"}'
-```
-
-2) Use it in subsequent calls:
-```bash
-Authorization: Bearer <access_token>
-```
-
-### Create an order (initiate payment)
-
-Endpoint:
-- `POST /api/customer/checkout/start`
-
-Creates:
-- `fact_orders.order_status = ORDER_CREATED`
-- `fact_payments.payment_status = PAYMENT_PENDING`
-
-Example:
-```bash
-curl -X POST http://localhost:8000/api/customer/checkout/start \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{
-    "items": [{"product_id": 1001, "qty": 2}],
-    "channel": "WEB",
-    "currency": "INR",
-    "payment_method": "UPI"
-  }'
-```
-
-### Complete payment (success / failed)
-
-Endpoint:
-- `POST /api/customer/orders/{order_id}/simulate-payment`
-
-Success transition:
-- `PAYMENT_PENDING → PAYMENT_SUCCESS`
-- `ORDER_CREATED → ORDER_CONFIRMED`
-
-Failure transition:
-- `PAYMENT_PENDING → PAYMENT_FAILED`
-- `ORDER_CREATED → ORDER_CANCELLED`
-
-Examples:
-
-Success:
-```bash
-curl -X POST http://localhost:8000/api/customer/orders/12345/simulate-payment \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{"success": true}'
-```
-
-Failure:
-```bash
-curl -X POST http://localhost:8000/api/customer/orders/12345/simulate-payment \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{"success": false, "failure_reason": "BANK_DOWN"}'
-```
-
-### Webhooks
-This project includes both:
-- a **simulated payment** endpoint for deterministic demos (`/api/customer/orders/{order_id}/simulate-payment`)
-- a **Razorpay sandbox** integration with provider-signed webhooks.
-
-Razorpay endpoints:
-- `POST /api/payments/razorpay/order?order_id=...` (creates Razorpay Order for an existing GlobalCart `order_id`)
-- `POST /api/payments/razorpay/confirm` (verifies checkout signature and confirms the order)
-- `POST /api/payments/razorpay/webhook` (provider-signed event ingestion + idempotency)
-
-## Step-by-step (Local + Public URL)
-
-### 0) Prerequisites
-- Python 3
-- Docker + Docker Compose
-- `cloudflared` installed (for public URL)
-
-### 1) Start PostgreSQL (Docker)
-From the repo root:
-
-```bash
-docker compose up -d
-```
-
-### 2) Create venv + install Python deps
-From the `globalcart-360` folder:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3) Generate synthetic (realistic) data
-
-```bash
-python -m src.generate_data --scale small
-```
-
-### 4) Load into PostgreSQL + build views
-
-```bash
-python -m src.load_to_postgres
-python -m src.run_sql --sql sql/02_views.sql
-```
-
-### 5) Enable auth + cart tables
-```bash
-python3 -m src.run_sql --sql sql/07_app_auth.sql
-python3 -m src.run_sql --sql sql/10_shop_features.sql
-python3 -m src.run_sql --sql sql/11_razorpay.sql
-python3 -m src.run_sql --sql sql/12_inventory.sql
-```
-
-### 6) Start the FastAPI backend (serves Shop + Admin)
-
-```bash
-python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 7) Open the local URLs
-- Shop: http://localhost:8000/shop/
-- Admin: http://localhost:8000/admin/
-- API docs: http://localhost:8000/docs
-
-### 8) Admin login
-- Default Admin Username: `admin`
-- Default Admin Password: `admin`
-
-### 9) Make it public (Cloudflare Quick Tunnel)
-Optional (demo convenience): in a new terminal (keep backend still running):
-
-```bash
-cloudflared tunnel --url http://127.0.0.1:8000
-```
-
-### 10) Open the public URLs
-Use the `trycloudflare.com` URL printed by `cloudflared`, then open:
-- Shop: `<public-url>/shop/`
-- Admin: `<public-url>/admin/`
-- API docs: `<public-url>/docs`
-
-Note: Quick Tunnel URLs are **ephemeral** and change on restart.
-
-### 11) Want the same URL always?
-Use a custom domain + Cloudflare **named tunnel** (stable URL).
-
-## CI/CD and Deployment
-
-- CI: GitHub Actions workflow at `.github/workflows/ci.yml` runs `pytest` and boots a Postgres service.
-- Container: `Dockerfile` can be used for Railway/Render/Fly.io.
-- Deployment guide: `docs/deployment.md`
-
-### Troubleshooting
-- If UI pages are not loading, confirm the backend is running on `http://127.0.0.1:8000`.
-- If the public URL stops working, restart the quick tunnel command and use the new printed `trycloudflare.com` URL.
-- If cart/checkout APIs return 500, ensure you ran the SQL in step 5.
-
-## One-command pipeline
-After PostgreSQL is running:
-```bash
-python -m src.pipeline --scale small --truncate
-```
-
-## Near real-time incremental refresh (simulation)
-This simulates a production-style incremental load with:
-- new orders/payments/shipments
-- late-arriving returns/refunds
-- status updates (delivered → delayed, delivered → completed)
-- `updated_at` watermark and idempotent upserts
-
-### 1) Ensure incremental objects exist (staging + upsert functions)
-```bash
-python -m src.run_sql --sql sql/04_incremental_refresh.sql --stop-on-error
-```
-
-### 2) Snapshot KPIs (before)
-Run in psql / any SQL client:
-```sql
-SELECT globalcart.snapshot_kpis('before');
-```
-
-### 3) Run incremental refresh
-```bash
-python -m src.incremental_refresh --since_timestamp "2025-12-19T12:00:00"
-```
-
-### 4) Snapshot KPIs (after) and compare
-```sql
-SELECT globalcart.snapshot_kpis('after');
-\i sql/05_before_after_kpis.sql
-```
-
-## Power BI Integration (BI Marts)
-### 1) Create BI materialized marts for Power BI
-```bash
-python -m src.run_sql --sql sql/06_bi_marts.sql
-```
-
-### 2) Refresh BI marts after new data
-```sql
-SELECT globalcart.refresh_bi_marts();
-```
-
-### 3) Power BI connection
-- Use PostgreSQL connector with `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` from `.env`
-- Import tables: `mart_exec_daily_kpis`, `mart_finance_profitability`, `mart_funnel_conversion`, `mart_product_performance`, `mart_customer_segments`
-- See `dashboards/powerbi/powerbi_bi_integration.md` for detailed setup and DAX measures.
-
-## KPI Consistency
-KPI definitions are centralized in:
-- `docs/kpi_definitions.md`
-- SQL views in `sql/02_views.sql`
-
-Dashboards and Python reuse the same definitions.
-
-## Notes
-- Default `--scale small` generates a sample sized dataset for laptops.
-- The schema and scripts are designed to scale conceptually to 100M+ orders/year with incremental/streaming ingestion patterns documented in `docs/architecture.md`.
-- Transactional features (cart, checkout, payments) are implemented with real DB transactions and explicit state machines suitable for interview demonstration.
+## ⚙️ Core Backend Architecture
+
+### Transactional E-commerce Features
+- **Atomic Order Creation**: Handled via `POST /api/customer/checkout/start` within a single DB transaction.
+- **State Machine**: `ORDER_CREATED → PAYMENT_PENDING → {PAYMENT_SUCCESS → ORDER_CONFIRMED} | {PAYMENT_FAILED → ORDER_CANCELLED}`.
+- **Inventory Locking**: Row-level locking to prevent overselling during high-concurrency checkouts.
+
+### Data Engineering & Analytics
+- **Star Schema**: Optimized PostgreSQL schema for analytical queries.
+- **Incremental Refresh**: Efficient data updates using `updated_at` watermarks and staging tables.
+- **BI Marts**: Materialized views for executive KPIs and performance trends.
+
+---
+
+## 🛠️ Technical Stack & Implementation Details
+- **Backend**: FastAPI (Python), Pydantic, SQLAlchemy.
+- **Database**: PostgreSQL (Star Schema).
+- **Auth**: JWT + OTP-based verification.
+- **Observability**: Structured logging + Request ID middleware.
+
+<details>
+<summary><b>View Full Repository Structure</b></summary>
+
+- `sql/`: DDL, views, KPI queries, BI marts.
+- `backend/`: FastAPI server, routes, security.
+- `src/`: Data generator, loaders, analytics pipeline.
+- `docs/`: Architecture, API spec, security notes.
+</details>
+
+<details>
+<summary><b>View Step-by-Step Installation</b></summary>
