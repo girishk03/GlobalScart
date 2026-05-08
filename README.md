@@ -38,22 +38,6 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 *Access Shop at `http://localhost:8000/shop/` | Admin at `http://localhost:8000/admin/`*
 
-## 📸 System Preview (High-Impact UI)
-
-### 🛠️ Backend Observability & Admin Analytics
-<p align="center">
-  <img src="screenshots/12-admin-analytics.png" width="32%" alt="Analytics Dashboard" />
-  <img src="screenshots/13-admin-audit.png" width="32%" alt="Audit Log" />
-  <img src="screenshots/15-journey-replay.png" width="32%" alt="User Journey" />
-</p>
-
-### 🛒 Transactional Storefront
-<p align="center">
-  <img src="screenshots/04-shop-home.png" width="32%" alt="Shop" />
-  <img src="screenshots/06-cart.png" width="32%" alt="Cart" />
-  <img src="screenshots/07-checkout-top.png" width="32%" alt="Checkout" />
-</p>
-
 ## 🏗️ Technical Architecture Details
 <details>
 <summary><b>View System Overview</b></summary>
@@ -81,6 +65,7 @@ For the “mixed concerns” story (analytics + APIs + UI + BI assets), see: `do
 
 </details>
 
+<details>
 <summary><b>View All Screenshots (Full Gallery)</b></summary>
 
 ### Customer Storefront
