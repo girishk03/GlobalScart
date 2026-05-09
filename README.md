@@ -11,9 +11,39 @@
 GlobalCart 360 is a production-style backend commerce engine featuring transactional checkout integrity, JWT-secured RBAC, near real-time analytics pipelines, and structured observability.
 
 ## 🏗️ System Architecture & Data Flow
-<p align="center">
-  <img src="docs/architecture_diagram.png" width="90%" alt="System Architecture Diagram" />
-</p>
+
+```mermaid
+graph TD
+    subgraph Client_Layer [Client Layer]
+        C[Storefront UI]
+        A[Admin Dashboard]
+    end
+
+    subgraph Backend_Layer [Backend Services]
+        F[FastAPI Backend]
+        M[Security Middleware]
+        T[Transaction Engine]
+    end
+
+    subgraph Database_Layer [Data Storage & Analytics]
+        DB[(PostgreSQL)]
+        Fact[Fact Tables]
+        Dim[Dimension Tables]
+        Views[Materialized Views]
+    end
+
+    C -->|REST API| M
+    A -->|JWT/RBAC| M
+    M --> F
+    F --> T
+    T -->|ACID Transactions| DB
+    
+    DB -->|ETL/Star Schema| Dim
+    DB -->|ETL/Star Schema| Fact
+    Fact --> Views
+    Dim --> Views
+    Views -->|KPI Aggregates| A
+```
 
 ## 🔥 Why This Project Matters
 - **Transactional Integrity**: Engineered a multi-stage checkout lifecycle (`ORDER_CREATED → PAYMENT_PENDING → SUCCESS/FAIL`) using PostgreSQL transactions for atomic consistency.
