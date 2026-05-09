@@ -1,6 +1,10 @@
 # GlobalCart 360: Backend Commerce & Analytics Engine
 
-[**🚀 API Documentation**](http://localhost:8000/docs) | [**🛒 Shop Demo**](http://localhost:8000/shop/) | [**📊 Admin Dashboard**](http://localhost:8000/admin/)
+![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.95+-009688.svg?style=flat&logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg?style=flat&logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-20.10+-2496ED.svg?style=flat&logo=docker&logoColor=white)
+![JWT](https://img.shields.io/badge/JWT-Auth-black.svg?style=flat&logo=json-web-tokens&logoColor=white)
 
 ## 🔥 Why This Project Matters
 - **Transactional Integrity**: Engineered a multi-stage checkout lifecycle (`ORDER_CREATED → PAYMENT_PENDING → SUCCESS/FAIL`) using PostgreSQL transactions for atomic consistency.
@@ -11,29 +15,29 @@
 
 ## 📸 System Preview (High-Impact UI)
 
-### 🛠️ Backend Observability & Admin Analytics
 <p align="center">
-  <img src="screenshots/12-admin-analytics.png" width="32%" alt="Analytics Dashboard" />
-  <img src="screenshots/13-admin-audit.png" width="32%" alt="Audit Log" />
-  <img src="screenshots/15-journey-replay.png" width="32%" alt="User Journey" />
+  <img src="screenshots/12-admin-analytics.png" width="90%" alt="Admin Analytics Dashboard" />
 </p>
 
-### 🛒 Transactional Storefront
+### 🛠️ Backend Observability & Admin Analytics
 <p align="center">
-  <img src="screenshots/04-shop-home.png" width="32%" alt="Shop" />
-  <img src="screenshots/06-cart.png" width="32%" alt="Cart" />
-  <img src="screenshots/07-checkout-top.png" width="32%" alt="Checkout" />
+  <img src="screenshots/13-admin-audit.png" width="48%" alt="Audit Log" />
+  <img src="screenshots/15-journey-replay.png" width="48%" alt="User Journey" />
 </p>
 
 ## ⚡ Quick Start (Local Demo)
 ```bash
-# 1. Start Database
+# 1. Clone & Setup
+git clone https://github.com/girishk03/GlobalScart.git
+cd GlobalScart
+
+# 2. Start Database
 docker-compose up -d
 
-# 2. Run Pipeline (Generate & Load Data)
+# 3. Run Pipeline (Generate & Load Data)
 python -m src.pipeline --scale small --truncate
 
-# 3. Start Backend
+# 4. Start Backend
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 *Access Shop at `http://localhost:8000/shop/` | Admin at `http://localhost:8000/admin/`*
