@@ -32,6 +32,7 @@ jobs:
       PGUSER: globalcart
       PGPASSWORD: globalcart
       ENV: dev
+      ADMIN_KEY: admin
       # For CI only. In prod you must set a strong secret.
       JWT_SECRET: ci-jwt-secret
       JWT_ISSUER: globalcart
@@ -55,7 +56,6 @@ jobs:
         run: |
           sleep 5
           python -m src.run_sql --sql sql/00_schema.sql
-          python -m src.run_sql --sql sql/01_dimensions.sql
           python -m src.generate_data --scale small --seed 42
           python -m src.load_to_postgres --truncate
           python -m src.run_sql --sql sql/02_views.sql
