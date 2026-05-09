@@ -201,11 +201,12 @@ curl -X POST http://localhost:8000/api/customer/checkout/start \
 </details>
 
 ## 🛠️ Tech Stack & Implementation Details
-- **SQL**: PostgreSQL (Star Schema, Transactional Store)
-- **Python**: FastAPI, Pydantic, SQLAlchemy, Pandas
-- **Auth**: JWT + OTP-based Role-Based Access Control (RBAC)
+
+- **Backend**: FastAPI (Python 3.11), Pydantic, SQLAlchemy
+- **Database**: PostgreSQL (Star Schema + Transactional Store)
+- **Security**: JWT + OTP-based Role-Based Access Control (RBAC)
 - **Observability**: Structured Logging, Request ID Tracing, Security Middleware
-- **Deployment**: Docker, Docker Compose
+- **Deployment**: Docker, Docker Compose, Render (Live)
 
 <details>
 <summary><b>View Full Repository Structure</b></summary>
@@ -215,3 +216,6 @@ curl -X POST http://localhost:8000/api/customer/checkout/start \
 - `src/`: Data generator, loaders, analytics pipeline.
 - `docs/`: Architecture diagrams, API spec, security notes.
 </details>
+
+<details>
+<summary><b>View Step-by-Step Installation & Full Gallery</b></summary>
