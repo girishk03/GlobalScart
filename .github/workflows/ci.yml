@@ -53,6 +53,7 @@ jobs:
 
       - name: Initialize DB schema + views
         run: |
+          sleep 5
           python -m src.generate_data --scale small --seed 42
           python -m src.load_to_postgres --truncate
           python -m src.run_sql --sql sql/02_views.sql
@@ -60,6 +61,7 @@ jobs:
           python -m src.run_sql --sql sql/10_shop_features.sql
           python -m src.run_sql --sql sql/11_razorpay.sql
           python -m src.run_sql --sql sql/12_inventory.sql
+          echo "DB Initialization Complete"
 
       - name: Run tests
         run: |
