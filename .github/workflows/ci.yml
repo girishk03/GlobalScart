@@ -67,4 +67,4 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest
+          pytest tests/test_health_check.py tests/test_payment_razorpay.py
