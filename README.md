@@ -1,5 +1,8 @@
 # GlobalCart 360: Backend Commerce & Analytics Engine
 
+[![Live Demo](https://img.shields.io/badge/demo-live-green.svg)](https://globalscart.onrender.com/shop/)
+[![Admin Dashboard](https://img.shields.io/badge/admin-dashboard-blue.svg)](https://globalscart.onrender.com/admin/)
+[![API Docs](https://img.shields.io/badge/api-docs-orange.svg)](https://globalscart.onrender.com/docs)
 ![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.95+-009688.svg?style=flat&logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg?style=flat&logo=postgresql&logoColor=white)
@@ -24,6 +27,11 @@
   <img src="screenshots/13-admin-audit.png" width="48%" alt="Audit Log" />
   <img src="screenshots/15-journey-replay.png" width="48%" alt="User Journey" />
 </p>
+
+## 🚀 Live Links
+- **🛒 [Storefront (Customer Flow)](https://globalscart.onrender.com/shop/)**
+- **📊 [Admin Analytics Dashboard](https://globalscart.onrender.com/admin/)**
+- **📜 [Swagger API Documentation](https://globalscart.onrender.com/docs)**
 
 ## ⚡ Quick Start (Local Demo)
 ```bash
