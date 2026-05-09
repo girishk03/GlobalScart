@@ -1,5 +1,7 @@
 # GlobalCart 360: Backend Commerce Engine
 
+[**🚀 Live Shop**](https://globalscart.onrender.com/shop/) | [**📊 Admin Dashboard**](https://globalscart.onrender.com/admin/) | [**📜 API Docs**](https://globalscart.onrender.com/docs)
+
 [![Live Demo](https://img.shields.io/badge/demo-live-green.svg)](https://globalscart.onrender.com/shop/)
 [![Admin Dashboard](https://img.shields.io/badge/admin-dashboard-blue.svg)](https://globalscart.onrender.com/admin/)
 [![API Docs](https://img.shields.io/badge/api-docs-orange.svg)](https://globalscart.onrender.com/docs)
