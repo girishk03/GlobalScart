@@ -25,6 +25,7 @@ jobs:
           --health-retries=5
 
     env:
+      PYTHONPATH: .
       PGHOST: localhost
       PGPORT: "5432"
       PGDATABASE: globalcart
