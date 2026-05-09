@@ -1,5 +1,8 @@
 # GlobalCart 360: Backend Commerce Engine
 
+![CI](https://github.com/girishk03/GlobalScart/actions/workflows/ci.yml/badge.svg)
+
+
 [**🚀 Live Shop**](https://globalscart.onrender.com/shop/) | [**📊 Admin Dashboard**](https://globalscart.onrender.com/admin/) | [**📜 API Docs**](https://globalscart.onrender.com/docs)
 
 [![Live Demo](https://img.shields.io/badge/demo-live-green.svg)](https://globalscart.onrender.com/shop/)
@@ -86,7 +89,7 @@ python -m src.pipeline --scale small --truncate
 # 4. Start Backend
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-*Access Shop at `http://localhost:8000/shop/` | Admin at `http://localhost:8000/admin/`*
+*Access Shop at `https://globalscart.onrender.com/shop/` | Admin at `https://globalscart.onrender.com/admin/`*
 
 ## 🛠️ Engineering Decisions (Tradeoffs & Solutions)
 
