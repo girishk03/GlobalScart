@@ -1,13 +1,19 @@
-# GlobalCart 360: Backend Commerce & Analytics Engine
+# GlobalCart 360: Backend Commerce Engine
 
 [![Live Demo](https://img.shields.io/badge/demo-live-green.svg)](https://globalscart.onrender.com/shop/)
 [![Admin Dashboard](https://img.shields.io/badge/admin-dashboard-blue.svg)](https://globalscart.onrender.com/admin/)
 [![API Docs](https://img.shields.io/badge/api-docs-orange.svg)](https://globalscart.onrender.com/docs)
-![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
+![Python](https://img.shields.io/badge/python-3.11-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.95+-009688.svg?style=flat&logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg?style=flat&logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-20.10+-2496ED.svg?style=flat&logo=docker&logoColor=white)
-![JWT](https://img.shields.io/badge/JWT-Auth-black.svg?style=flat&logo=json-web-tokens&logoColor=white)
+
+GlobalCart 360 is a production-style backend commerce engine featuring transactional checkout integrity, JWT-secured RBAC, near real-time analytics pipelines, and structured observability.
+
+## 🏗️ System Architecture & Data Flow
+<p align="center">
+  <img src="docs/architecture_diagram.png" width="90%" alt="System Architecture Diagram" />
+</p>
 
 ## 🔥 Why This Project Matters
 - **Transactional Integrity**: Engineered a multi-stage checkout lifecycle (`ORDER_CREATED → PAYMENT_PENDING → SUCCESS/FAIL`) using PostgreSQL transactions for atomic consistency.
