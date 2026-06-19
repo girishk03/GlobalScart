@@ -173,7 +173,7 @@ sequenceDiagram
     P-->>C: Razorpay checkout response
     C->>A: POST /api/payments/razorpay/confirm
     A->>A: Verify HMAC signature
-    A->>D: Confirm payment and order; consume reservation
+    A->>D: Confirm payment and order, then consume reservation
     A-->>C: Confirmed order state
 ```
 
