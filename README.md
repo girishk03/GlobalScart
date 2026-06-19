@@ -10,6 +10,22 @@ GlobalScart 360 is a Python backend and analytics project that models an e-comme
 
 [Live Shop](https://globalscart.onrender.com/shop/) · [Admin Dashboard](https://globalscart.onrender.com/admin/) · [Swagger UI](https://globalscart.onrender.com/docs)
 
+## Quick Start
+
+```bash
+git clone https://github.com/girishk03/GlobalScart.git
+cd GlobalScart
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+docker compose up -d postgres
+python -m src.pipeline --scale small --truncate
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Open `http://localhost:8000/docs` for the interactive API documentation. See [Setup Guide](#setup-guide) for database initialization and environment details.
+
 ## Project Overview
 
 The repository combines a FastAPI application, PostgreSQL transactional and analytical schemas, a browser-based storefront and admin interface, Python data pipelines, SQL reporting marts, Docker packaging, and automated tests. It is designed as a portfolio implementation of backend engineering patterns rather than a production payment platform.
@@ -45,26 +61,18 @@ Commerce systems must keep customer, inventory, order, and payment state consist
 ## Architecture
 
 ```mermaid
-flowchart LR
-    Client["Client: Storefront and Admin UI"]
-    API["FastAPI Backend: REST APIs, JWT and RBAC"]
-    DB[("PostgreSQL: Transactional and analytical data")]
-    Analytics["Analytics Layer: SQL views, BI marts and Python pipelines"]
-    Delivery["Docker and GitHub Actions: Build, test and deployment workflow"]
-
-    Client -->|HTTP / JSON| API
-    API -->|Transactions and queries| DB
-    DB -->|Facts, dimensions and events| Analytics
-    Analytics -->|Reports and dashboard data| API
-    API --> Delivery
-    Analytics --> Delivery
+graph TD
+    A[Client] --> B[FastAPI Backend]
+    B --> C[(PostgreSQL)]
+    C --> D[Analytics Layer]
+    D --> E[Docker and GitHub Actions Deployment]
 ```
 
 FastAPI serves the customer and admin applications and coordinates database transactions. PostgreSQL stores operational records and analytical facts and dimensions. SQL and Python jobs transform those records into views, marts, forecasts, segments, and report artifacts. Docker provides a reproducible runtime, while GitHub Actions initializes PostgreSQL and executes the selected CI test suite.
 
 ## Engineering Decisions
 
-| Concern | Implementation | Rationale |
+| Challenge | Solution | Engineering Impact |
 | --- | --- | --- |
 | Inventory consistency | Row-level locks and explicit inventory reservations | Prevent concurrent checkout requests from overselling available stock |
 | Checkout integrity | Order, item, payment, reservation, and audit writes share a database transaction | Keep related state changes atomic and recoverable |
@@ -294,7 +302,7 @@ The repository includes CI validation and a deployable Docker image definition. 
 ### Run all tests
 
 ```bash
-python -m pytest
+pytest
 ```
 
 ### Run the CI-focused tests
