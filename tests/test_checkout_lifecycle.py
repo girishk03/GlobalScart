@@ -76,6 +76,63 @@ def _ensure_stock(product_id: int, on_hand: int) -> None:
         conn.commit()
 
 
+def _get_inventory(product_id: int) -> tuple[int, int]:
+    with psycopg.connect(_dsn()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT on_hand_qty, reserved_qty FROM globalcart.product_inventory WHERE product_id = %s;",
+                (int(product_id),),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            return int(row[0]), int(row[1])
+
+
+def _get_reservation(order_id: int, product_id: int) -> tuple[int, str]:
+    with psycopg.connect(_dsn()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT qty, status
+                FROM globalcart.order_inventory_reservations
+                WHERE order_id = %s AND product_id = %s;
+                """,
+                (int(order_id), int(product_id)),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            return int(row[0]), str(row[1])
+
+
+def _get_order_payment_state(order_id: int, payment_id: int) -> tuple[str, str]:
+    with psycopg.connect(_dsn()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT o.order_status, p.payment_status
+                FROM globalcart.fact_orders o
+                JOIN globalcart.fact_payments p ON p.order_id = o.order_id
+                WHERE o.order_id = %s AND p.payment_id = %s;
+                """,
+                (int(order_id), int(payment_id)),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            return str(row[0]), str(row[1])
+
+
+def _count_customer_orders(customer_id: int) -> int:
+    with psycopg.connect(_dsn()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM globalcart.fact_orders WHERE customer_id = %s;",
+                (int(customer_id),),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            return int(row[0])
+
+
 def test_checkout_success_flow(client: TestClient):
     customer_id = _ensure_test_customer_exists(client)
     product_id = _pick_any_product(client)
@@ -107,6 +164,10 @@ def test_checkout_success_flow(client: TestClient):
     order_id = int(checkout["order_id"])
     payment_id = int(checkout["payment_id"])
 
+    reserved_qty, reservation_status = _get_reservation(order_id, product_id)
+    assert reserved_qty == 2
+    assert reservation_status == "RESERVED"
+
     # Simulate payment success
     r = client.post(
         f"/api/customer/orders/{order_id}/simulate-payment?customer_id={customer_id}",
@@ -119,8 +180,43 @@ def test_checkout_success_flow(client: TestClient):
     assert result["order_id"] == order_id
     assert result["payment_id"] == payment_id
 
-    # Verify DB state (optional sanity check)
-    # We can query directly via psycopg if needed, but API responses are sufficient for this test
+    order_status, payment_status = _get_order_payment_state(order_id, payment_id)
+    assert order_status == "ORDER_CONFIRMED"
+    assert payment_status == "PAYMENT_SUCCESS"
+
+    _, reserved_after_payment = _get_inventory(product_id)
+    assert reserved_after_payment == 0
+
+
+def test_checkout_cancellation_releases_inventory(client: TestClient):
+    customer_id = _ensure_test_customer_exists(client)
+    product_id = _pick_any_product(client)
+    _ensure_stock(product_id, on_hand=20)
+    on_hand_before, _ = _get_inventory(product_id)
+
+    response = client.post(
+        "/api/customer/checkout/start",
+        json={
+            "customer_id": customer_id,
+            "items": [{"product_id": product_id, "qty": 1}],
+            "channel": "WEB",
+        },
+    )
+    assert response.status_code == 200
+    order_id = int(response.json()["order_id"])
+    assert _get_reservation(order_id, product_id) == (1, "RESERVED")
+
+    response = client.post(
+        f"/api/customer/orders/{order_id}/cancel",
+        json={"customer_id": customer_id, "reason": "Test cancellation"},
+    )
+    assert response.status_code == 200
+    assert response.json()["order_status"] == "CANCELLED"
+
+    assert _get_reservation(order_id, product_id) == (1, "RELEASED")
+    on_hand_after, reserved_after = _get_inventory(product_id)
+    assert on_hand_after == on_hand_before
+    assert reserved_after == 0
 
 
 def test_checkout_failure_flow(client: TestClient):
@@ -156,6 +252,7 @@ def test_checkout_failure_flow(client: TestClient):
 
 def test_checkout_rollback_on_invalid_product(client: TestClient):
     customer_id = _ensure_test_customer_exists(client)
+    orders_before = _count_customer_orders(customer_id)
 
     # Attempt checkout with an invalid product_id (should rollback)
     r = client.post(
@@ -167,7 +264,7 @@ def test_checkout_rollback_on_invalid_product(client: TestClient):
         },
     )
     assert r.status_code == 400
-    # Ensure no order/payment rows were created (implicit via API behavior; DB check optional)
+    assert _count_customer_orders(customer_id) == orders_before
 
 
 def test_cart_persistence_and_totals(client: TestClient):
