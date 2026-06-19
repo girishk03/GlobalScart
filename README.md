@@ -158,23 +158,21 @@ See [`docs/security.md`](docs/security.md) for security boundaries and productio
 
 ```mermaid
 sequenceDiagram
-    participant C as Customer Client
-    participant A as FastAPI Backend
-    participant D as PostgreSQL Database
-    participant P as Razorpay API
-
-    C->>A: POST /api/customer/checkout/start
-    A->>D: Lock inventory rows
-    A->>D: Create order, items, payment and reservations
-    D-->>A: Commit ORDER_CREATED / PAYMENT_PENDING
-    A-->>C: Checkout identifiers and totals
-    C->>A: POST /api/payments/razorpay/order
-    A->>P: Create provider order
-    P-->>C: Razorpay checkout response
-    C->>A: POST /api/payments/razorpay/confirm
-    A->>A: Verify HMAC signature
-    A->>D: Confirm payment and order, then consume reservation
-    A-->>C: Confirmed order state
+    participant C as Customer
+    participant A as API
+    participant D as Database
+    participant P as Payment Provider
+    C->>A: Start checkout
+    A->>D: Create order and reserve inventory
+    D-->>A: Checkout created
+    A-->>C: Return checkout details
+    C->>A: Start payment
+    A->>P: Create payment order
+    P-->>C: Return payment details
+    C->>A: Confirm payment
+    A->>D: Update payment and order
+    D-->>A: Consume inventory reservation
+    A-->>C: Return confirmed order
 ```
 
 Checkout calculates totals server-side, locks inventory rows, reserves stock, and writes the order, order items, payment, and audit records within a database transaction. Failed or cancelled flows release reservations. Provider webhook events are keyed by provider and event ID so retries do not apply the same transition twice.
