@@ -10,6 +10,8 @@ GlobalScart 360 is a Python backend and analytics project that models an e-comme
 
 [Live Shop](https://globalscart.onrender.com/shop/) · [Admin Dashboard](https://globalscart.onrender.com/admin/) · [Swagger UI](https://globalscart.onrender.com/docs)
 
+> Render free-tier apps may take 30–60 seconds to wake up.
+
 ## Quick Start
 
 ```bash
