@@ -1,4 +1,4 @@
-# GlobalCart 360
+# GlobalScart 360
 
 [![CI](https://github.com/girishk03/GlobalScart/actions/workflows/ci.yml/badge.svg)](https://github.com/girishk03/GlobalScart/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
@@ -6,7 +6,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 
-GlobalCart 360 is a Python backend and analytics project that models an e-commerce platform end to end: customer authentication, catalog and cart operations, transactional checkout, inventory reservation, payment processing, order lifecycle management, and analytical reporting.
+GlobalScart 360 is a Python backend and analytics project that models an e-commerce platform end to end: customer authentication, catalog and cart operations, transactional checkout, inventory reservation, payment processing, order lifecycle management, and analytical reporting.
 
 [Live Shop](https://globalscart.onrender.com/shop/) · [Admin Dashboard](https://globalscart.onrender.com/admin/) · [Swagger UI](https://globalscart.onrender.com/docs)
 
@@ -16,7 +16,7 @@ The repository combines a FastAPI application, PostgreSQL transactional and anal
 
 ## Problem Statement
 
-Commerce systems must keep customer, inventory, order, and payment state consistent while also exposing trustworthy data for operational and business reporting. GlobalCart 360 demonstrates how those concerns can be handled in one reproducible project, with explicit transaction boundaries, authenticated access, idempotent payment events, and an analytics layer built from the same PostgreSQL source.
+Commerce systems must keep customer, inventory, order, and payment state consistent while also exposing trustworthy data for operational and business reporting. GlobalScart 360 demonstrates how those concerns can be handled in one reproducible project, with explicit transaction boundaries, authenticated access, idempotent payment events, and an analytics layer built from the same PostgreSQL source.
 
 ## Key Features
 
@@ -46,11 +46,11 @@ Commerce systems must keep customer, inventory, order, and payment state consist
 
 ```mermaid
 flowchart LR
-    Client[Client<br/>Storefront and Admin UI]
-    API[FastAPI Backend<br/>REST APIs, JWT and RBAC]
-    DB[(PostgreSQL<br/>Transactional and analytical data)]
-    Analytics[Analytics Layer<br/>SQL views, BI marts and Python pipelines]
-    Delivery[Docker and GitHub Actions<br/>Build, test and deployment workflow]
+    Client["Client: Storefront and Admin UI"]
+    API["FastAPI Backend: REST APIs, JWT and RBAC"]
+    DB[("PostgreSQL: Transactional and analytical data")]
+    Analytics["Analytics Layer: SQL views, BI marts and Python pipelines"]
+    Delivery["Docker and GitHub Actions: Build, test and deployment workflow"]
 
     Client -->|HTTP / JSON| API
     API -->|Transactions and queries| DB
@@ -61,6 +61,17 @@ flowchart LR
 ```
 
 FastAPI serves the customer and admin applications and coordinates database transactions. PostgreSQL stores operational records and analytical facts and dimensions. SQL and Python jobs transform those records into views, marts, forecasts, segments, and report artifacts. Docker provides a reproducible runtime, while GitHub Actions initializes PostgreSQL and executes the selected CI test suite.
+
+## Engineering Decisions
+
+| Concern | Implementation | Rationale |
+| --- | --- | --- |
+| Inventory consistency | Row-level locks and explicit inventory reservations | Prevent concurrent checkout requests from overselling available stock |
+| Checkout integrity | Order, item, payment, reservation, and audit writes share a database transaction | Keep related state changes atomic and recoverable |
+| Payment retries | Provider event IDs are persisted with a unique key | Make webhook processing idempotent when Razorpay retries delivery |
+| Authorization | JWT role claims protect customer and admin routes | Keep identity and role checks explicit at the API boundary |
+| Analytics refresh | Watermarks, staging tables, and conditional upserts | Process changed records without rebuilding the full analytical model |
+| Request tracing | Request IDs are accepted or generated and returned in responses | Correlate API responses with structured application logs |
 
 ## Folder Structure
 
@@ -137,10 +148,10 @@ See [`docs/security.md`](docs/security.md) for security boundaries and productio
 
 ```mermaid
 sequenceDiagram
-    participant C as Customer
-    participant A as FastAPI
-    participant D as PostgreSQL
-    participant P as Razorpay
+    participant C as Customer Client
+    participant A as FastAPI Backend
+    participant D as PostgreSQL Database
+    participant P as Razorpay API
 
     C->>A: POST /api/customer/checkout/start
     A->>D: Lock inventory rows
@@ -195,7 +206,13 @@ pip install -r requirements.txt
 
 ### 4. Configure `.env`
 
-Create `.env` in the repository root:
+Copy the tracked environment template, then edit the generated `.env` file:
+
+```bash
+cp .env.example .env
+```
+
+Configure the values for your local environment. The key settings are:
 
 ```dotenv
 ENV=dev
@@ -274,16 +291,16 @@ The repository includes CI validation and a deployable Docker image definition. 
 
 ## Testing
 
-Run the complete pytest suite:
+### Run all tests
 
 ```bash
-pytest
+python -m pytest
 ```
 
-Run the same focused modules used by CI:
+### Run the CI-focused tests
 
 ```bash
-pytest tests/test_health_check.py tests/test_payment_razorpay.py
+python -m pytest tests/test_health_check.py tests/test_payment_razorpay.py
 ```
 
 The test suite covers health checks, APIs, carts, checkout, inventory, payments, order creation, and lifecycle transitions. Tests that exercise PostgreSQL require the schema and test environment variables described above.
