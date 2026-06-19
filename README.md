@@ -1,4 +1,4 @@
-# GlobalScart 360
+# GlobalScart 360: Backend Commerce & Analytics Engine
 
 [![CI](https://github.com/girishk03/GlobalScart/actions/workflows/ci.yml/badge.svg)](https://github.com/girishk03/GlobalScart/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
