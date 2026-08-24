@@ -3,6 +3,28 @@ __pycache__/
 *.pyc
 .DS_Store
 .env
+*.log
+
+# Simulation Data Paths (root)
 data/raw/
 data/processed/
-*.log
+
+# E-commerce Data Platform Paths
+data_platform/data/raw/
+data_platform/data/processed/
+data_platform/metadata/watermarks/watermarks.json
+data_platform/metadata/audit/migration_reconciliation_audit.json
+
+# Apache Airflow local runtime files
+data_platform/airflow/airflow.db
+data_platform/airflow/airflow.cfg
+data_platform/airflow/webserver_config.py
+data_platform/airflow/logs/
+data_platform/airflow/airflow-webserver.pid
+
+# Terraform local state and modules
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+.terraform.lock.hcl

@@ -1,17 +1,18 @@
-name: CI
+name: CI Pipeline
 
 on:
   push:
     branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
-  test:
+  validate:
     runs-on: ubuntu-latest
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:15
         env:
           POSTGRES_USER: globalcart
           POSTGRES_PASSWORD: globalcart
@@ -19,52 +20,86 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd="pg_isready -U globalcart -d globalcart"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
-    env:
-      PYTHONPATH: .
-      PGHOST: localhost
-      PGPORT: "5432"
-      PGDATABASE: globalcart
-      PGUSER: globalcart
-      PGPASSWORD: globalcart
-      ENV: dev
-      ADMIN_KEY: admin
-      # For CI only. In prod you must set a strong secret.
-      JWT_SECRET: ci-jwt-secret
-      JWT_ISSUER: globalcart
-      JWT_AUDIENCE: globalcart
-      DEMO_SHOW_OTP: "1"
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Java 17 (for PySpark)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Python 3.13
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.13'
+          cache: 'pip'
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pyspark==4.2.0 google-cloud-bigquery pyarrow apache-airflow==3.3.1
 
-      - name: Initialize DB schema + views
-        run: |
-          sleep 5
-          python -m src.run_sql --sql sql/00_schema.sql
-          python -m src.generate_data --scale small --seed 42
-          python -m src.load_to_postgres --truncate
-          python -m src.run_sql --sql sql/02_views.sql
-          python -m src.run_sql --sql sql/07_app_auth.sql
-          python -m src.run_sql --sql sql/10_shop_features.sql
-          python -m src.run_sql --sql sql/11_razorpay.sql
-          python -m src.run_sql --sql sql/12_inventory.sql
-          echo "DB Initialization Complete"
+      - name: Setup environment variables
+        run: cp .env.example .env
 
-      - name: Run tests
+      - name: Initialize Database and Generate Mock Data
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGDATABASE: globalcart
+          PGUSER: globalcart
+          PGPASSWORD: globalcart
         run: |
-          pytest tests/test_health_check.py tests/test_payment_razorpay.py
+          python -m src.pipeline --scale small --truncate
+
+      - name: Run Backend Unit Tests
+        env:
+          PYTHONPATH: .
+          PGHOST: localhost
+          PGPORT: 5432
+          PGDATABASE: globalcart
+          PGUSER: globalcart
+          PGPASSWORD: globalcart
+        run: |
+          pytest tests/
+
+      - name: Validate Raw Landing Zone Data Quality
+        run: |
+          python data_platform/validation/data_quality.py
+
+      - name: Run PySpark Star Schema Transformation
+        run: |
+          python data_platform/spark/transform_ecommerce.py
+
+      - name: Run PySpark Validation Suite
+        run: |
+          python data_platform/spark/spark_validation.py
+
+      - name: Run Airflow DAG Compile and Import Check
+        run: |
+          export AIRFLOW_HOME=$PWD/data_platform/airflow
+          python data_platform/airflow/dags/globalcart_pipeline.py
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.7
+
+      - name: Terraform Format and Validate Check
+        run: |
+          cd infrastructure/terraform
+          terraform init -backend=false
+          terraform fmt -check
+          terraform validate
+
+      - name: Docker Build Check
+        run: |
+          docker build -t globalcart-app:latest .
