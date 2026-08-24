@@ -66,6 +66,16 @@ jobs:
           python -m src.run_sql --sql sql/11_razorpay.sql
           python -m src.run_sql --sql sql/12_inventory.sql
 
+      - name: Extract PostgreSQL transactional tables to Raw landing zone
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGDATABASE: globalcart
+          PGUSER: globalcart
+          PGPASSWORD: globalcart
+        run: |
+          python data_platform/ingestion/postgres_extractor.py
+
       - name: Run Backend Unit Tests
         env:
           PYTHONPATH: .
