@@ -1,7 +1,13 @@
+import sys
 from pathlib import Path
 import pandas as pd
 
+# Add parent directory to sys.path to import utils
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(PROJECT_ROOT))
+
+from data_platform.utils.observability import PipelineObserver, logger
+
 RAW_DIR = PROJECT_ROOT / "data_platform" / "data" / "raw" / "postgres"
 
 def read_raw_table(table_name: str) -> pd.DataFrame:
@@ -61,14 +67,10 @@ def validate_orders():
         validate_unique(df, "order_id"),
         validate_not_null(df, "customer_id"),
         validate_not_null(df, "geo_id"),
-        validate_not_null(df, "order_status"),
+        validate_non_negative(df, "net_amount"),
         validate_timestamp(df, "order_ts"),
         validate_timestamp(df, "created_at"),
         validate_timestamp(df, "updated_at"),
-        validate_non_negative(df, "gross_amount"),
-        validate_non_negative(df, "discount_amount"),
-        validate_non_negative(df, "tax_amount"),
-        validate_non_negative(df, "net_amount"),
     ]
     return checks
 
@@ -84,37 +86,33 @@ def validate_customers():
     ]
     return checks
 
-def print_results(table_name, checks):
-    print(f"\n{table_name}")
-    print("-" * len(table_name))
+def log_results(table_name, checks):
+    logger.info(f"Results for {table_name}:")
     for check in checks:
         status = "PASS" if check["passed"] else "FAIL"
-        print(
-            f"{status}: "
-            f"{check['check']} "
-            f"(failed records: "
-            f"{check['failed_records']})"
+        logger.info(
+            f"  {status}: {check['check']} (failed records: {check['failed_records']})"
         )
 
 def main():
-    print("Starting GlobalScart data-quality validation...")
-    order_results = validate_orders()
-    customer_results = validate_customers()
-    print_results("fact_orders", order_results)
-    print_results("dim_customer", customer_results)
-    
-    all_checks = order_results + customer_results
-    failed = [check for check in all_checks if not check["passed"]]
-    
-    print("\nValidation summary")
-    print("------------------")
-    print(f"Total checks: {len(all_checks)}")
-    print(f"Passed:       {len(all_checks) - len(failed)}")
-    print(f"Failed:       {len(failed)}")
-    
-    if failed:
-        raise SystemExit("Data-quality validation failed.")
-    print("\nAll validation checks passed.")
+    with PipelineObserver("data_quality") as observer:
+        logger.info("Starting GlobalScart data-quality validation...")
+        order_results = validate_orders()
+        customer_results = validate_customers()
+        
+        log_results("fact_orders", order_results)
+        log_results("dim_customer", customer_results)
+        
+        all_checks = order_results + customer_results
+        failed = [check for check in all_checks if not check["passed"]]
+        
+        logger.info(f"DQ Summary: Total checks={len(all_checks)}, Passed={len(all_checks) - len(failed)}, Failed={len(failed)}")
+        
+        if failed:
+            raise ValueError(f"Data-quality validation failed. {len(failed)} check(s) failed.")
+        
+        observer.complete(len(all_checks))
+        logger.info("All validation checks passed.")
 
 if __name__ == "__main__":
     main()

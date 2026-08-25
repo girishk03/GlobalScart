@@ -7,6 +7,8 @@ def create_spark_session() -> SparkSession:
         .master("local[*]")
         .config("spark.sql.shuffle.partitions", "8")
         .config("spark.sql.adaptive.enabled", "true")
+        .config("spark.driver.memory", "2g")
+        .config("spark.executor.memory", "2g")
         .getOrCreate()
     )
 

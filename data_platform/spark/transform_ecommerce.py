@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
@@ -11,7 +12,13 @@ from pyspark.sql.types import (
     DateType,
     BooleanType,
 )
-from spark_session import create_spark_session
+
+# Add parent directory to sys.path to import utils
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(PROJECT_ROOT))
+
+from data_platform.spark.spark_session import create_spark_session
+from data_platform.utils.observability import PipelineObserver, logger
 
 # Project root paths
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -121,12 +128,12 @@ def deduplicate_by_id(df, id_column, sort_column="updated_at"):
         .drop("rn")
     )
 
-def main():
+def main() -> int:
     spark = create_spark_session()
-    print("\nStarting Star Schema PySpark pipeline...\n")
+    logger.info("Starting Star Schema PySpark pipeline...")
 
     # 1. READ RAW TABLES
-    print("Reading raw datasets...")
+    logger.info("Reading raw datasets...")
     raw_orders = read_table(spark, "fact_orders", FACT_ORDERS_SCHEMA)
     raw_items = read_table(spark, "fact_order_items", FACT_ORDER_ITEMS_SCHEMA)
     raw_customer = read_table(spark, "dim_customer", DIM_CUSTOMER_SCHEMA)
@@ -273,17 +280,18 @@ def main():
         "discount_percentage"
     )
 
-    print(f"Constructed fact_sales row count: {fact_sales.count()}")
+    fact_sales_count = fact_sales.count()
+    logger.info(f"Constructed fact_sales row count: {fact_sales_count}")
 
     # 5. WRITE PROCESSED PARQUET DATASETS
-    print("\nWriting processed datasets to Parquet...")
+    logger.info("Writing processed datasets to Parquet...")
     
     # Dimensions (overwrite, regular parquet files)
     dim_customer_prep.write.mode("overwrite").parquet(str(PROCESSED_PATH / "dim_customer"))
     dim_product_prep.write.mode("overwrite").parquet(str(PROCESSED_PATH / "dim_product"))
     dim_geo_prep.write.mode("overwrite").parquet(str(PROCESSED_PATH / "dim_geo"))
     dim_date_cleaned.write.mode("overwrite").parquet(str(PROCESSED_PATH / "dim_date"))
-    print("✓ Successfully wrote processed dimensions (customer, product, geo, date).")
+    logger.info("✓ Successfully wrote processed dimensions (customer, product, geo, date).")
 
     # Fact sales (overwrite, partitioned by year and month)
     (
@@ -293,12 +301,15 @@ def main():
         .partitionBy("order_year", "order_month")
         .parquet(str(PROCESSED_PATH / "fact_sales"))
     )
-    print("✓ Successfully wrote processed fact_sales (partitioned by year/month).")
+    logger.info("✓ Successfully wrote processed fact_sales (partitioned by year/month).")
 
     # Print out summary
-    print("\nTransformation pipeline completed successfully.")
-    print(f"Processed Parquet output root: {PROCESSED_PATH}")
+    logger.info("Transformation pipeline completed successfully.")
+    logger.info(f"Processed Parquet output root: {PROCESSED_PATH}")
     spark.stop()
+    return fact_sales_count
 
 if __name__ == "__main__":
-    main()
+    with PipelineObserver("spark_transformation") as observer:
+        rows = main()
+        observer.complete(rows)

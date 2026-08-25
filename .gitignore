@@ -28,3 +28,6 @@ data_platform/airflow/airflow-webserver.pid
 *.tfstate.*
 crash.log
 .terraform.lock.hcl
+
+# Local runtime states
+data_platform/metadata/observability_run_id.txt

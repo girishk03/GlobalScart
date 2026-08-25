@@ -1,94 +1,101 @@
-# Architecture (GlobalCart 360)
+# GlobalScart Data Engineering Platform Architecture
 
-## System diagram (demo)
+This document details the production-grade data platform architecture designed for GlobalScart. It covers the data lifecycle from the transactional PostgreSQL database through to the Google Cloud BigQuery data warehouse.
+
+---
+
+## 1. System Topology & Pipeline Flow
+
+The platform implements an automated, orchestrated, and validated ELT (Extract-Load-Transform) architecture:
 
 ```mermaid
-flowchart LR
-  UI[Shop UI /shop\nHTML+JS] -->|JWT Bearer| API[FastAPI backend\nbackend/main.py]
+sequenceDiagram
+    autonumber
+    participant PG as PostgreSQL (OLTP)
+    participant Ext as Python Ingestion (postgres_extractor)
+    participant Raw as Raw Zone (CSVs)
+    participant DQ as Python Validation (data_quality)
+    participant Spark as PySpark Engine (transform_ecommerce)
+    participant Proc as Processed Zone (Parquet)
+    participant SV as Spark Validation (spark_validation)
+    participant BQ as Google BigQuery (DWH)
+    participant Rec as Migration Reconciler (reconciler)
+    participant Audit as DB Audit (pipeline_audit)
 
-  API --> AUTH[/api/auth/*\nOTP + JWT/]
-  API --> CUST[/api/customer/*\nproducts, cart, checkout, orders/]
-  API --> PAY[/api/payments/*\nRazorpay sandbox/]
-  PAY -->|Webhook| API
+    Note over PG, Audit: Orchestrated by Apache Airflow (hourly schedules)
 
-  API --> DB[(PostgreSQL\nSchema: globalcart)]
-  DB --> VIEWS[SQL Views\n(sql/02_views.sql)]
-  VIEWS --> BI[PowerBI/Tableau\n(dashboards/)]
-  DB --> PY[Python analytics\n(src/, notebooks/)]
+    Ext->>PG: Query incremental changes since last watermark
+    PG-->>Ext: Return delta records
+    Ext->>Raw: Write CSV files (dim_customer, fact_orders, etc.)
+    Ext->>Audit: Record step telemetry (STARTED/SUCCESS, duration, row counts)
+    
+    DQ->>Raw: Read CSVs and apply checks (Null, Unique, Range)
+    DQ-->>Audit: Record validation stats
+    
+    Spark->>Raw: Load raw tables from directory
+    Spark->>Spark: Deduplicate & join (Star Schema fact_sales)
+    Spark->>Proc: Write partitioned Parquet files (by order_year, order_month)
+    Spark-->>Audit: Record transformation row counts
+    
+    SV->>Proc: Load Parquet files
+    SV->>SV: Validate referential integrity & financial totals
+    SV-->>Audit: Record validation telemetry
+    
+    BQ->>Proc: Read Parquet files
+    BQ->>BQ: Atomic load (truncate & replace), partition (order_date), cluster (customer_id, product_id)
+    BQ-->>Audit: Record load telemetry
+    
+    Rec->>PG: Query active window transactional aggregates
+    Rec->>BQ: Query active window warehouse aggregates
+    Rec->>Rec: Reconcile row counts & financial sums
+    Rec-->>Audit: Record final reconciliation telemetry
 ```
 
-## Target Operating Model (Real Company)
+---
 
-### Data Sources (Operational)
-- Orders service (order created/updated)
-- Payments service (auth/capture/refund/chargeback)
-- Shipping service (fulfillment events, carrier SLAs)
-- Returns service (return initiated/approved/refunded)
-- Web/App event stream (product views, cart actions, checkout, payment attempts)
+## 2. Ingestion & Incrementality (Watermarking)
 
-### Near Real-Time Assumption
-- Events arrive continuously; KPI dashboards refresh every **15–30 minutes**.
-- Facts are updated incrementally using a watermark (e.g., `updated_at`) and idempotent upserts.
+Transactional source tables (`dim_customer`, `fact_orders`, `fact_order_items`, `fact_payments`, `fact_shipments`) are extracted incrementally using **updated_at watermarks**. 
+* **State Management**: Watermarks are tracked locally in `data_platform/metadata/watermarks.json` to allow checkpoint restarts.
+* **Extraction Strategy**:
+  - Incremental extracts read changes since `max(updated_at)` of the previous run.
+  - Raw files are written to table-specific timestamped files: `load_YYYYMMDD_HHMMSS.csv`.
+  - PySpark reads the entire folder matching `data_platform/data/raw/postgres/<table>/*.csv`, automatically consolidating past runs with incremental delta records.
 
-## Incremental Refresh (Implemented in this repo)
+---
 
-### Key design decisions
-- **Watermark**: `updated_at` on all facts and key dimensions; stored per-source in `globalcart.etl_watermarks`.
-- **Staging**: `globalcart.stg_*` tables to land deltas.
-- **Idempotency**: upserts only apply when incoming `updated_at` is newer than target.
-- **Historical accuracy**: updated fact rows are captured in `globalcart.audit_fact_*` before overwrite.
+## 3. Data Processing & Optimizations (PySpark)
 
-### Incremental flow
-1. Source events (order/payment/shipping/return) arrive.
-2. ELT job reads only events where `updated_at > last_processed_ts`.
-3. Load into staging tables.
-4. Execute upsert functions to merge into facts/dimensions.
-5. Advance the watermark.
-6. BI refresh reads current-state tables/views.
+PySpark transformations convert raw transactional tables into an analytical **Star Schema**:
+* **Deduplication**: Resolves duplicate records from multiple source runs using window functions ordered by `updated_at DESC`.
+* **Fact Table Generation**: Links orders, items, payments, and shipments together into a consolidated `fact_sales` grain.
+* **Spark Local Performance Optimizations**:
+  - `spark.sql.shuffle.partitions` is set to `8` to minimize task serialization/network overhead in single-node/local simulation runs.
+  - Adaptive Query Execution (AQE) is enabled (`spark.sql.adaptive.enabled = true`) for dynamic partition coalescing.
+  - Local memory allocations are explicitly limited (`spark.driver.memory = 2g`, `spark.executor.memory = 2g`) to prevent out-of-memory heap space exhaustion.
 
-### Demo scripts
-- `sql/04_incremental_refresh.sql` (staging + upsert functions + KPI snapshots)
-- `src/incremental_refresh.py` (generates deltas + loads staging + runs upserts + logs insert/update counts)
+---
 
-### Warehouse (PostgreSQL)
-- Star schema in schema `globalcart`.
-- KPI definitions standardized via SQL views (`sql/02_views.sql`).
+## 4. Analytical Warehouse Layout (BigQuery)
 
-### Funnel Tracking (Milestone 2)
-- Funnel events are stored in `globalcart.fact_funnel_events` and keyed by `session_id`.
-- Events can be anonymous (guest checkout), hence `customer_id` is nullable.
-- This is analogous to how Amazon/Flipkart teams track the customer journey:
-  - event collection at the edge (web/app)
-  - sessionization and enrichment (customer/device/channel)
-  - funnel metrics computed as session-level flags per stage
-  - revenue leakage estimated from drop-offs and failures, and tied back to Finance P&L.
+Analytical datasets are ingested into **Google Cloud BigQuery** under the `globalcart_analytics` dataset:
+* **Partitioning**: The `fact_sales` table is partitioned daily on the `order_date` column. This minimizes query scan costs by restricting reads to active date partitions.
+* **Clustering**: Configured with cluster keys `['customer_id', 'product_id']`. This clusters rows with matching IDs within each partition block to optimize drill-down queries.
+* **Atomic Transactions**: Ingestion uses BigQuery `WRITE_TRUNCATE` configuration to ensure loads are idempotent, safe for retries, and completely atomic.
 
-#### How conversion is calculated
-- The funnel is evaluated at the **session** granularity (not raw event counts).
-- Each stage is a boolean flag per session (e.g., a session can have many `VIEW_PRODUCT` events, but it counts as 1 “viewed session”).
-- Core rates:
-  - `conversion_rate = sessions_with_ORDER_PLACED / sessions_with_VIEW_PRODUCT`
-  - `cart_abandonment_rate = (sessions_with_ADD_TO_CART - sessions_with_CHECKOUT_STARTED) / sessions_with_ADD_TO_CART`
-  - `payment_failure_rate = sessions_with_PAYMENT_FAILED / sessions_with_PAYMENT_ATTEMPTED`
+---
 
-#### How leakage ties back to Finance (Milestone 1)
-- Finance P&L explains realized profit erosion (refunds, shipping cost, gateway fees, COGS).
-- Funnel leakage explains **pre-purchase loss** (sessions that expressed intent but did not convert).
-- In real marketplaces, both are monitored together:
-  - Funnel drop-offs are owned by product/UX/payment reliability teams.
-  - P&L leakage is owned by operations/quality/CS teams.
+## 5. Observability, Auditing, & Self-Healing
 
-### Analytics Layer
-- Python pulls from warehouse for EDA, segmentation, and forecasting.
-- Outputs stored as reproducible artifacts:
-  - `data/processed/` (segments, forecasts)
-  - `reports/` (plots, Excel management report)
-
-### BI Layer (Power BI/Tableau)
-- Executive Dashboard: business health + profit leakage
-- Operational Dashboard: SLA/returns/payments drilldowns
-
-## Scaling Notes (100M+ orders/year)
-- Partition large facts by date (monthly) and maintain summary tables for speed.
-- Use indexes on `order_ts`, `customer_id`, `product_id` and event timestamps.
-- Consider a streaming layer (Kafka/Kinesis) + incremental ELT in production.
+The system includes a centralized PostgreSQL audit logger (`globalcart.pipeline_audit`) driven by a context manager (`PipelineObserver`):
+* **Telemetry Fields**:
+  - `run_id`: Unique identifier sharing run scope between standalone steps (local runtime state file or Airflow execution run ID).
+  - `step_name`: The pipeline module (e.g. `ingestion`, `spark_transformation`, `bigquery_load`).
+  - `status`: Execution state (`STARTED`, `SUCCESS`, `FAILED`).
+  - `rows_processed`: Row counts or metric tallies.
+  - `duration_seconds`: Step duration.
+  - `error_message`: Stack trace captures on exception.
+* **Active Partition Reconciliation**: The BigQuery Sandbox environment enforces a strict 60-day partition expiration limit. The end-to-end `reconciler.py` handles this dynamically:
+  1. Fetches the minimum partition date present in BigQuery.
+  2. Queries PostgreSQL source database aggregates matching only that active date window.
+  3. Reconciles BigQuery warehouse aggregates with Postgres, achieving a 100% accurate reconciliation matrix.
