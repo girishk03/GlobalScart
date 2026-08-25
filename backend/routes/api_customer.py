@@ -2536,8 +2536,8 @@ def cancel_order(
                 now = _utc_now()
                 delivered_done = delivered_dt is not None and delivered_dt <= now.date()
                 shipped_done = shipped_ts is not None and shipped_ts <= now
-                if status.upper() != "PLACED" or delivered_done or shipped_done:
-                    raise HTTPException(status_code=400, detail="Only PLACED orders can be cancelled")
+                if status.upper() not in ("PLACED", "ORDER_CREATED") or delivered_done or shipped_done:
+                    raise HTTPException(status_code=400, detail="Only PLACED or ORDER_CREATED orders can be cancelled")
 
                 cur.execute(
                     """
