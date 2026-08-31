@@ -1,20 +1,21 @@
-# GlobalScart: Production-Grade Data Engineering & Analytics Platform
+# GlobalCart-360: Personal Capstone Data Engineering Project
 
 [![CI Pipeline](https://github.com/girishk03/GlobalScart/actions/workflows/ci.yml/badge.svg)](https://github.com/girishk03/GlobalScart/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
 ![PySpark](https://img.shields.io/badge/Apache_Spark-3.5-E25A1B?logo=apache-spark&logoColor=white)
+![dbt](https://img.shields.io/badge/dbt-Transforms-FF694B?logo=dbt&logoColor=white)
 ![GCP BigQuery](https://img.shields.io/badge/Google_BigQuery-DWH-4285F4?logo=google-cloud&logoColor=white)
 ![Apache Airflow](https://img.shields.io/badge/Apache_Airflow-Orchestrated-017A86?logo=apache-airflow&logoColor=white)
 
-GlobalScart is a production-grade data platform demonstrating end-to-end data lifecycle management, starting from transactional PostgreSQL tables (OLTP) through to an optimized Google Cloud BigQuery data warehouse (DWH), orchestrated by Apache Airflow and fully validated by GitHub Actions CI/CD.
+GlobalCart-360 is a personal capstone data engineering project demonstrating end-to-end data lifecycle design, starting from transactional PostgreSQL and Azure SQL databases (OLTP) through to an optimized Google Cloud BigQuery data warehouse (DWH), using dbt and PySpark for transformations, orchestrated by Apache Airflow, and validated by GitHub Actions CI/CD.
 
 ---
 
 ## 1. Problem Statement
 
-Modern e-commerce architectures face a key challenge: **transactional systems (OLTP) are optimized for consistency and writes, whereas business analysis (OLAP) requires high-performance, cost-effective aggregation**. 
+Modern e-commerce architectures face a key challenge: **transactional systems (OLTP) are optimized for transactional consistency, whereas business analysis (OLAP) requires high-performance, cost-effective aggregation**. 
 
-Exposing transactional databases directly to analytical queries results in CPU lockups and high query latency. GlobalScart addresses this problem by designing an automated, validated, and optimized ELT pipeline that extracts incremental transaction deltas, restructures them into an analytical Star Schema, loads them into GCP BigQuery with daily partitioning and clustering, and runs end-to-end financial reconciliation audits to guarantee 100% data integrity.
+Exposing transactional databases directly to analytical queries results in CPU lockups and high query latency. GlobalCart-360 addresses this problem by designing an automated, validated, and optimized batch pipeline that extracts incremental transaction deltas, restructures them into staging views and marts in dbt, processes them via PySpark into a Star Schema, loads them into GCP BigQuery with daily partitioning and clustering, and runs active-window financial reconciliation audits.
 
 ---
 
@@ -25,10 +26,11 @@ The platform implements a multi-stage data processing lifecycle:
 ```mermaid
 sequenceDiagram
     autonumber
-    participant PG as PostgreSQL (OLTP)
-    participant Ext as Python Ingestion (postgres_extractor)
+    participant PG as PostgreSQL / Azure SQL (OLTP)
+    participant Ext as Python Ingestion (extractors)
     participant Raw as Raw Zone (CSVs)
     participant DQ as Python Validation (data_quality)
+    participant dbt as dbt (Staging & Marts)
     participant Spark as PySpark Engine (transform_ecommerce)
     participant Proc as Processed Zone (Parquet)
     participant SV as Spark Validation (spark_validation)
@@ -36,7 +38,7 @@ sequenceDiagram
     participant Rec as Migration Reconciler (reconciler)
     participant Audit as DB Audit (pipeline_audit)
 
-    Note over PG, Audit: Orchestrated by Apache Airflow (hourly schedules)
+    Note over PG, Audit: Orchestrated by Apache Airflow (Manual/Hourly batches)
 
     Ext->>PG: Query incremental changes since last watermark
     PG-->>Ext: Return delta records
@@ -45,6 +47,9 @@ sequenceDiagram
     
     DQ->>Raw: Read CSVs and apply checks (Null, Unique, Range)
     DQ-->>Audit: Record validation stats
+    
+    dbt->>PG: Run staging and analytical mart transformations
+    dbt-->>Audit: Record dbt run/test checks
     
     Spark->>Raw: Load raw tables from directory
     Spark->>Spark: Deduplicate & join (Star Schema fact_sales)
@@ -66,12 +71,13 @@ sequenceDiagram
 ```
 
 ### Data Pipeline Stages:
-1. **Incremental Ingestion (`postgres_extractor.py`)**: Reads transaction logs from PostgreSQL using `updated_at` watermarks to fetch daily deltas. Raw data is landed locally as timestamped CSVs (`load_YYYYMMDD_HHMMSS.csv`).
+1. **Incremental Ingestion (`postgres_extractor.py`, `sqlserver_extractor.py`)**: Reads transaction logs from PostgreSQL and Azure SQL using `updated_at` watermarks to fetch daily deltas. Raw data is landed locally as timestamped CSVs.
 2. **Raw Data Quality (`data_quality.py`)**: Performs schema and range checks (uniqueness of primary keys, checking that amounts are non-negative, and null checks) before starting compute engines.
-3. **Star Schema PySpark Transformation (`transform_ecommerce.py`)**: Utilizes Spark to deduplicate raw delta records (resolving updates by `updated_at DESC`), maps data into a Star Schema (consolidating customer, product, geo, date dimensions, and a centralized `fact_sales` fact table), and writes out partitioned Parquet files.
-4. **PySpark Output Validation (`spark_validation.py`)**: Executes referential integrity validations, duplicate key scans, and financial reconciliation (ensuring sum of raw order items net revenue matches processed fact sales net revenue).
-5. **BigQuery Loading (`loader.py`)**: Atomically uploads local Parquet dataframes into BigQuery tables. Configures **daily time partitioning** on `order_date` and **clustering** on `['customer_id', 'product_id']` for the `fact_sales` table to optimize query costs.
-6. **Active-Window Migration Reconciliation (`reconciler.py`)**: Reconciles the transactional database directly against the BigQuery warehouse. To handle BigQuery Sandbox's automatic 60-day partition expiration limits, the reconciler programmatically queries the minimum active partition date in BigQuery and performs active-window validation, ensuring a 100% accurate reconciliation matrix.
+3. **dbt Transformation & Tests**: Compiles staging views and fct_sales analytical tables in the PostgreSQL database, executing unit tests (`dbt test`) to verify constraints.
+4. **Star Schema PySpark Transformation (`transform_ecommerce.py`)**: Utilizes Spark to deduplicate raw delta records (resolving updates by `updated_at DESC`), maps data into a Star Schema (consolidating customer, product, geo, date dimensions, and a centralized `fact_sales` fact table), and writes out partitioned Parquet files.
+5. **PySpark Output Validation (`spark_validation.py`)**: Executes referential integrity validations, duplicate key scans, and financial reconciliation (ensuring sum of raw order items net revenue matches processed fact sales net revenue).
+6. **BigQuery Loading (`loader.py`)**: Atomically uploads local Parquet dataframes into BigQuery tables. Configures **daily time partitioning** on `order_date` and **clustering** on `['customer_id', 'product_id']` for the `fact_sales` table to optimize query scans.
+7. **Active-Window Migration Reconciliation (`reconciler.py`)**: Reconciles the transactional database directly against the BigQuery warehouse. To handle BigQuery Sandbox's automatic 60-day partition expiration limits, the reconciler programmatically queries the minimum active partition date in BigQuery and performs active-window validation.
 
 ---
 
@@ -79,13 +85,14 @@ sequenceDiagram
 
 | Layer | Technologies | Purpose |
 | --- | --- | --- |
-| **Transactional Source** | PostgreSQL 15 | OLTP transactional database storing e-commerce state. |
-| **Ingestion & Ingestion** | Python 3.13, Pandas, psycopg2 | Incremental watermarked extractor and landing validation. |
+| **Transactional Sources** | PostgreSQL 15, Azure SQL Database | OLTP transactional databases storing e-commerce states. |
+| **Ingestion & Validation** | Python 3.13, Pandas, psycopg2 | Incremental watermarked extractors and landing validation. |
+| **SQL Transformations** | dbt (Data Build Tool), PostgreSQL | Decoupled SQL staging views, analytics marts, and constraints testing. |
 | **Big Data Engine** | Apache Spark 3.5 (PySpark) | Deduplication, join consolidations, and Parquet partitioning. |
 | **Analytical DWH** | Google Cloud BigQuery | Cloud Data Warehouse storing analytics schemas. |
 | **Orchestration** | Apache Airflow 2.10 | DAG definition and task execution dependencies scheduling. |
 | **Observability** | PostgreSQL Auditing (`pipeline_audit`) | Recording pipeline metrics, status, duration, and errors. |
-| **Infrastructure (IaC)** | Terraform | Declaration of GCP analytical datasets and resources. |
+| **Infrastructure (IaC)** | Terraform | Offline declaration of GCP analytical datasets and resources. |
 | **CI/CD Validation** | GitHub Actions | Automated end-to-end regression validation on git push. |
 
 ---
@@ -107,6 +114,7 @@ A successful execution of the orchestrator logs pipeline metrics into the audit 
 | :--- | :--- | :--- | :--- | :--- |
 | **ingestion** | SUCCESS | 517 | 0.22s | Incremental watermark checked, raw CSV files written. |
 | **data_quality** | SUCCESS | 14 | 0.15s | Null checks, PK uniqueness, non-negative amounts pass. |
+| **dbt run & test** | SUCCESS | 5 models, 10 tests | 1.29s | Staging views built, fct_sales tests passed. |
 | **spark_transformation** | SUCCESS | 179,840 | 9.66s | Star Schema Parquet datasets generated successfully. |
 | **spark_validation** | SUCCESS | 179,840 | 6.17s | Source revenue matches processed ($7,996,196,257.76). |
 | **bigquery_load** | SUCCESS | 28,691 | 32.38s | 5 analytical tables loaded, partitioned, and clustered. |
@@ -128,39 +136,43 @@ A successful execution of the orchestrator logs pipeline metrics into the audit 
 2. Set up environment variables:
    ```bash
    cp .env.example .env
-   # Edit .env and supply your PGHOST, PGPORT, and PG credentials
+   # Edit .env and supply your database host and GCP credentials
    ```
 
-### 6.2 Spin Up PostgreSQL and Initialize Schema
-1. Spin up the Postgres OLTP database using Docker:
-   ```bash
-   docker compose up -d postgres
-   ```
+### 6.2 Spin Up Databases and Initialize Schema
+1. Start your local database services (PostgreSQL can run natively on host port 5432 or via Docker, SQL Server can run in Azure SQL Database).
 2. Initialize transactional tables, app schemas, and observability audit tables:
    ```bash
    # Executes migrations 01_schema.sql through 13_observability.sql
-   ./.venv/bin/python src/pipeline.py --scale small --truncate
+   python src/pipeline.py --scale small --truncate
    ```
 
 ### 6.3 Run the Data Pipeline Standalone
 Run each step sequentially to test execution and check database telemetry:
 ```bash
-# 1. Ingestion
+# 1. Ingest PostgreSQL & Azure SQL
 python data_platform/ingestion/postgres_extractor.py
+python data_platform/ingestion/sqlserver_extractor.py
 
-# 2. Data Quality
+# 2. Data Quality Check
 python data_platform/validation/data_quality.py
 
-# 3. PySpark Star Schema Transformation
+# 3. dbt SQL Transformations & constraint tests
+cd data_platform/dbt
+dbt run --profiles-dir .
+dbt test --profiles-dir .
+cd ../..
+
+# 4. PySpark Star Schema Transformation
 python data_platform/spark/transform_ecommerce.py
 
-# 4. PySpark Data Validation
+# 5. PySpark Data Validation
 python data_platform/spark/spark_validation.py
 
-# 5. Load to BigQuery (Assumes gcloud ADC credentials are configured)
+# 6. Load to BigQuery (Assumes gcloud credentials are set)
 python data_platform/bigquery/loader.py
 
-# 6. Active Window Reconciliation
+# 7. Active Window Reconciliation
 python data_platform/migration/reconciler.py
 ```
 

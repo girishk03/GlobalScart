@@ -1,41 +1,41 @@
-# GlobalScart Data Engineering Interview & Resume Guide
+# GlobalCart-360 Personal Portfolio Project: Interview & Resume Guide
 
-This guide compiles high-impact resume bullets, system topology, and system design Q&As based on the actual verified results and layout of the GlobalScart Data Engineering Platform.
+This guide compiles technical resume points, system design Q&As, and architecture walk-throughs for the **GlobalCart-360 Personal Portfolio Capstone Project**.
 
 ---
 
-## 1. Metric-Focused Resume Bullets
+## 1. Technical Resume Points
 
-* **Data Ingestion & Extraction**:
-  > Engineered an incremental, watermark-based ETL pipeline in Python using `updated_at` timestamps to capture daily transaction deltas from PostgreSQL, tracking watermark states locally to enable resume-from-failure logic.
+* **Batch & Watermark Ingestion**:
+  > Engineered a dual-source batch ETL pipeline in Python using `updated_at` watermarks to capture daily transaction deltas from PostgreSQL and Azure SQL Database, staging raw transactional batches locally for downstream consumption.
 
-* **Dimensional Modeling & PySpark Processing**:
-  > Developed a distributed PySpark data processing engine to ingest, clean, and deduplicate e-commerce records, transforming them into a structured Star Schema (customer, product, location, date dimensions and a centralized `fact_sales` table of 179K+ rows). Capped local PySpark driver/executor memory at 2GB and configured 8 shuffle partitions to optimize memory overhead.
+* **Dimensional Modeling & PySpark Transformations**:
+  > Configured a local PySpark processing engine to clean, deduplicate, and join e-commerce entities into a structured Star Schema (179K+ fact records), constraining driver/executor memory allocations to 2GB to optimize single-node system footprint.
 
-* **Warehouse Optimization & Ingestion**:
-  > Designed a Google Cloud BigQuery data warehouse (globalcart_analytics) with daily time partitioning on `order_date` and clustering on `['customer_id', 'product_id']` for the `fact_sales` table to minimize query data scanning. Built an atomic loader using `WRITE_TRUNCATE` to guarantee run-level idempotency.
+* **SQL-Based Modeling with dbt**:
+  > Built a modular dbt (Data Build Tool) project to manage SQL transformations in PostgreSQL, defining staging views and final analytical marts (`fct_sales`), and automated data integrity validations using dbt schema assertions (uniqueness, not_null).
 
-* **End-to-End Auditing & Reconciliation**:
-  > Built a multi-stage validation suite comprising data quality constraints, Spark referential integrity validation, and end-to-end active-window reconciliations, achieving **0-row discrepancy** and **$0.00 financial variance** between source transactional PostgreSQL tables and the BigQuery warehouse (reconciling 179,814 fact rows and $7.996B of transactional volume).
+* **Warehouse Optimization & Loading**:
+  > Designed the destination analytics layout for Google Cloud BigQuery with daily partitioning on `order_date` and clustering on `customer_id` and `product_id` to optimize scanned bytes, using `WRITE_TRUNCATE` loads to enforce run-level idempotency.
 
-* **Orchestration, Observability, & CI/CD**:
-  > Orchestrated the ETL pipeline across 6 standalone stages using Apache Airflow. Built a logging auditing context-manager (`PipelineObserver`) to record duration, row counts, and exceptions into a Postgres audit table, and automated regression checks via GitHub Actions CI/CD to yield a **green 4m 52s build**.
+* **Orchestration & Automated Testing**:
+  > Orchestrated the linear ETL tasks using Apache Airflow. Built a logging observer (`PipelineObserver`) to log run-level execution statuses and tracebacks into an audit table, and integrated GitHub Actions CI/CD to validate codebase logic.
 
 ---
 
 ## 2. Technical System Design Q&A
 
 ### Q1: Why PySpark instead of Pandas?
-* **Answer**: *"While Pandas is ideal for single-node datasets that fit comfortably in memory, it loads the entire dataset into the driver process, causing it to crash with Out of Memory (OOM) errors as volume scales. PySpark builds a directed acyclic graph (DAG) of transformations and executes lazily, distributing processing partitions across a cluster. This allows us to scale processing capacity simply by adding nodes to a Dataproc cluster without changing our codebase."*
+* **Answer**: *"While Pandas is ideal for in-memory manipulation of single-node datasets, it lacks horizontal scaling capabilities and easily crashes due to out-of-memory errors on large files. PySpark builds a lazy-evaluated execution DAG (directed acyclic graph) and handles data in distributed partitions. This design ensures that the pipeline's core logic can transition to a managed cloud cluster (like GCP Dataproc) without refactoring the codebase."*
 
 ### Q2: Why Parquet?
-* **Answer**: *"Parquet is a columnar storage format optimized for heavy read operations:
-  1. **Column projection**: It reads only the bytes of the specific columns requested in a query, which is a major performance boost over parsing entire lines in CSV formats.
+* **Answer**: *"Parquet is a columnar storage format optimized for read-heavy analytical workloads:
+  1. **Column projection**: It reads only the byte segments of the specific columns requested in a query, which is a major performance boost over parsing entire lines in CSV formats.
   2. **Metadata blocks**: Parquet stores min/max statistics for every row group, allowing Spark or BigQuery to skip scanning irrelevant blocks (predicate pushdown).
   3. **Schema encapsulation**: Parquet embeds data type definitions, avoiding data type mismatch issues during ingestion."*
 
 ### Q3: How does your watermarking differ from Change Data Capture (CDC)?
-* **Answer**: *"My pipeline uses **watermark-based incremental ingestion**. The extractor queries PostgreSQL for records updated since the last recorded watermark (`WHERE updated_at > last_watermark`) and updates the state with the maximum timestamp in the batch. 
+* **Answer**: *"My pipeline uses **watermark-based incremental ingestion**. The extractor queries the database for records updated since the last recorded watermark (`WHERE updated_at > last_watermark`) and updates the state with the maximum timestamp in the batch. 
   
   This is different from **CDC**, which captures transactions at the database log level (e.g., streaming WAL write-ahead log updates via Debezium and Kafka). Watermarking is simpler to implement and debug for batch architectures but requires an index on `updated_at` and does not natively capture hard deletes or intermediary state updates."*
 
@@ -61,16 +61,15 @@ This guide compiles high-impact resume bullets, system topology, and system desi
 
 ### Q10: Walk me through your Airflow DAG. What are the tasks, dependencies, schedule, retries, and failure handling?
 * **Answer**: *"The pipeline is orchestrated by a single DAG, [`globalcart_data_engineering_pipeline`](file:///Users/saigirish050704/Documents/globalcart-360/data_platform/airflow/dags/globalcart_pipeline.py). It consists of 6 sequential tasks executed via `BashOperator` tasks to isolate the compute execution environments:
-  1. `extract_postgresql`: Ingests transactional delta records incrementally using updated_at watermarks.
-  2. `data_quality_check`: Validates raw CSV files against nullability, uniqueness, and timestamp range constraints.
-  3. `pyspark_star_schema_transform`: Triggers PySpark transformations to deduplicate records, build dimensions, and output partitioned Parquet datasets.
-  4. `spark_output_validation`: Runs in-engine validation checks for referential integrity and financial revenue counts.
-  5. `bigquery_load`: Loads Parquet dataframes atomically into daily-partitioned and clustered BigQuery tables.
-  6. `bigquery_warehouse_reconciliation`: Reconciles transactional Postgres rows and revenue against the BigQuery active partition window.
+  1. `extract_postgresql` & `extract_sqlserver`: Ingest transactional database tables in parallel using watermark boundaries.
+  2. `data_quality_check`: Validates raw CSV landing files against nullability, uniqueness, and timestamp range constraints.
+  3. `dbt_run_transformations` & `dbt_test_constraints`: Runs dbt models to compile staging views and fct_sales tables in PostgreSQL, running automated unique/not_null tests.
+  4. `pyspark_star_schema_transform`: Triggers PySpark transformations to deduplicate records, build dimensions, and output partitioned Parquet datasets.
+  5. `spark_output_validation`: Runs in-engine validation checks for referential integrity and financial revenue counts.
+  6. `bigquery_load`: Loads Parquet dataframes atomically into daily-partitioned and clustered BigQuery tables.
+  7. `bigquery_warehouse_reconciliation`: Reconciles transactional Postgres rows and revenue against the BigQuery active partition window.
   
-  The dependency chain is strictly sequential: `extract_task >> quality_task >> transform_task >> validation_task >> load_task >> reconcile_task` to prevent processing data downstream if any step fails.
-  
-  For failure recovery, the DAG is configured with `retries: 1` and a `retry_delay: timedelta(minutes=2)` for transient network drops. Scripts use a custom `PipelineObserver` context manager that intercepts exceptions, writes a `FAILED` record with full traceback details to the PostgreSQL audit table, and raises a non-zero exit code to alert Airflow."*
+  The dependency chain is strictly sequential to prevent processing data downstream if any step fails. For failure recovery, the DAG is configured with `retries: 1` and a `retry_delay: timedelta(minutes=2)`. We use a custom `PipelineObserver` context manager that intercepts exceptions, writes a `FAILED` record with full traceback details to our PostgreSQL audit table, and exits with a non-zero code to alert Airflow."*
 
 ### Q11: Why did you choose BigQuery? How did you load/update the data, and how would you reduce query cost?
 * **Answer**: *"I chose Google Cloud BigQuery as the analytics warehouse for its serverless compute engine and separate pricing models for compute and storage. It offers high-performance columnar execution, making it highly cost-effective for aggregations across specific columns.
@@ -81,3 +80,11 @@ This guide compiles high-impact resume bullets, system topology, and system desi
   1. **Daily time partitioning** on `order_date`: Queries filtering on date ranges perform partition pruning, scanning only relevant partition blocks.
   2. **Clustering** on `customer_id` and `product_id`: BigQuery physically sorts the rows within each partition by these keys, allowing it to skip reading unrelated data blocks during analytical filters."*
 
+### Q12: How did you implement dbt and why is it included in your project?
+* **Answer**: *"I set up dbt (Data Build Tool) to manage SQL-based transformations inside our PostgreSQL local warehouse layer. I structured the project into staging models (which perform initial column renaming, type casting, and data cleaning) and analytical marts (such as `fct_sales`, which consolidates e-commerce orders, items, products, and customer dimensions into a unified analytical schema). This decoupled modeling logic from our PySpark and ingestion tasks, and allowed us to run automated constraint tests (`dbt test`) to verify primary key uniqueness and non-null values before loading the data into BigQuery."*
+
+### Q13: What is the design footprint of the Power BI integration?
+* **Answer**: *"I mapped out the semantic data model and wrote visual specifications for Power BI dashboards in `docs/powerbi_design.md`. This details our Star Schema relationships, configure import mode with incremental refreshes on `order_date`, and defines key DAX measures for business metrics, including:
+  * Customer Lifetime Value (CLV) cohort calculations using `CALCULATE` and `ALLSELECTED` filters.
+  * Delivery SLA compliance rates comparing order status and delivery delays.
+  * Executive sales KPIs and gross profit margins."*
