@@ -1,0 +1,12 @@
+globalcart_profile:
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: globalcart
+      pass: globalcart
+      dbname: globalcart
+      schema: globalcart
+      threads: 4
+  target: dev

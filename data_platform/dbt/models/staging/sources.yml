@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: globalcart_source
+    schema: globalcart
+    tables:
+      - name: dim_customer
+      - name: dim_product
+      - name: dim_geo
+      - name: fact_orders
+      - name: fact_order_items

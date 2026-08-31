@@ -1,0 +1,27 @@
+name: 'globalcart_dbt'
+version: '1.0.0'
+config-version: 2
+
+# This setting points to the profile in profiles.yml
+profile: 'globalcart_profile'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  globalcart_dbt:
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: analytics

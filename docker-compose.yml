@@ -11,5 +11,15 @@ services:
     volumes:
       - globalcart_pgdata:/var/lib/postgresql/data
 
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: globalcart_mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Globalcart_password123!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+
 volumes:
   globalcart_pgdata:

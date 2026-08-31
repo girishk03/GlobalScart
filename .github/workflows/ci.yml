@@ -92,6 +92,12 @@ jobs:
         run: |
           python data_platform/validation/data_quality.py
 
+      - name: Run dbt Transformations and Constraint Tests
+        run: |
+          cd data_platform/dbt
+          dbt run --profiles-dir .
+          dbt test --profiles-dir .
+
       - name: Run PySpark Star Schema Transformation
         run: |
           python data_platform/spark/transform_ecommerce.py
