@@ -58,3 +58,26 @@ This guide compiles high-impact resume bullets, system topology, and system desi
 
 ### Q9: How did you perform end-to-end reconciliation?
 * **Answer**: *"I implemented a dual-validation layer. `spark_validation.py` performs in-engine count checks and financial totals matches. Then `reconciler.py` connects PostgreSQL OLTP directly with BigQuery. To handle BigQuery Sandbox's automatic 60-day partition expiration limits, the reconciler queries BigQuery's minimum partition date, filters the PostgreSQL query to matching dates (`WHERE order_ts::date >= bq_min_date`), and matches counts and revenues. This confirmed a 0-row discrepancy and $0.00 difference for the active window."*
+
+### Q10: Walk me through your Airflow DAG. What are the tasks, dependencies, schedule, retries, and failure handling?
+* **Answer**: *"The pipeline is orchestrated by a single DAG, [`globalcart_data_engineering_pipeline`](file:///Users/saigirish050704/Documents/globalcart-360/data_platform/airflow/dags/globalcart_pipeline.py). It consists of 6 sequential tasks executed via `BashOperator` tasks to isolate the compute execution environments:
+  1. `extract_postgresql`: Ingests transactional delta records incrementally using updated_at watermarks.
+  2. `data_quality_check`: Validates raw CSV files against nullability, uniqueness, and timestamp range constraints.
+  3. `pyspark_star_schema_transform`: Triggers PySpark transformations to deduplicate records, build dimensions, and output partitioned Parquet datasets.
+  4. `spark_output_validation`: Runs in-engine validation checks for referential integrity and financial revenue counts.
+  5. `bigquery_load`: Loads Parquet dataframes atomically into daily-partitioned and clustered BigQuery tables.
+  6. `bigquery_warehouse_reconciliation`: Reconciles transactional Postgres rows and revenue against the BigQuery active partition window.
+  
+  The dependency chain is strictly sequential: `extract_task >> quality_task >> transform_task >> validation_task >> load_task >> reconcile_task` to prevent processing data downstream if any step fails.
+  
+  For failure recovery, the DAG is configured with `retries: 1` and a `retry_delay: timedelta(minutes=2)` for transient network drops. Scripts use a custom `PipelineObserver` context manager that intercepts exceptions, writes a `FAILED` record with full traceback details to the PostgreSQL audit table, and raises a non-zero exit code to alert Airflow."*
+
+### Q11: Why did you choose BigQuery? How did you load/update the data, and how would you reduce query cost?
+* **Answer**: *"I chose Google Cloud BigQuery as the analytics warehouse for its serverless compute engine and separate pricing models for compute and storage. It offers high-performance columnar execution, making it highly cost-effective for aggregations across specific columns.
+  
+  We load the datasets atomically via `loader.py` using Pandas and PyArrow. Ingestion uses the `WRITE_TRUNCATE` write disposition. This guarantees run-level idempotency by replacing the table on reload, ensuring we never duplicate rows on retry. (At higher scale, we would load to staging and execute a SQL `MERGE` to update the production fact).
+  
+  To minimize query scan costs and optimize performance, we configure:
+  1. **Daily time partitioning** on `order_date`: Queries filtering on date ranges perform partition pruning, scanning only relevant partition blocks.
+  2. **Clustering** on `customer_id` and `product_id`: BigQuery physically sorts the rows within each partition by these keys, allowing it to skip reading unrelated data blocks during analytical filters."*
+
